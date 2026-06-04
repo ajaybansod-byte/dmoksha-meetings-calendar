@@ -56,6 +56,7 @@ const meetingColor = (type) => {
 const MEETING_TYPES = ["1st Meeting", "2nd Meeting", "3rd Meeting", "4th Meeting", "5th Meeting"];
 const STATUSES = ["Converted", "Dropped", "Ongoing", "Estimate sent", "Estimate Pending", "2nd meeting pending", "Office visit"];
 const RECORDING_OPTS = ["Yes", "No"];
+const DESIGNERS = ["Janvi Shah", "Ritika Baijal", "Tarannum Momin"];
 
 // === Date helpers ===
 const pad = (n) => String(n).padStart(2, "0");
@@ -754,7 +755,7 @@ function EditModal({ record, onClose, onSave, onDelete }) {
           <Input label="Mobile Number" type="tel" inputMode="tel" value={form.mobile_number} onChange={set("mobile_number")} />
           <Input label="Area" value={form.area} onChange={set("area")} />
           <Input label="# Windows" type="number" inputMode="numeric" min="0" value={form.windows} onChange={set("windows")} />
-          <Input label="Designer Name" value={form.designer_name} onChange={set("designer_name")} />
+          <Select label="Designer Name" value={form.designer_name} onChange={set("designer_name")} options={DESIGNERS} allowEmpty />
           <Input label="Support Name" value={form.support_name} onChange={set("support_name")} />
           <Select label="Meeting Type" value={form.meeting_type} onChange={set("meeting_type")} options={MEETING_TYPES} />
           <Select label="Status" value={form.status} onChange={set("status")} options={STATUSES} allowEmpty />
