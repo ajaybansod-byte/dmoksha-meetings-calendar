@@ -8,6 +8,13 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script>
+  // Force classic React JSX transform so transpiled output uses React.createElement
+  // (avoids `import { jsx } from "react/jsx-runtime"` which can't run in an inline script).
+  Babel.registerPreset("react-classic", {
+    presets: [[Babel.availablePresets["react"], { runtime: "classic" }]],
+  });
+</script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 <style>
@@ -34,7 +41,7 @@
 <body>
 <div id="root"></div>
 
-<script type="text/babel" data-presets="env,react">
+<script type="text/babel" data-presets="env,react-classic">
 const { useState, useEffect, useMemo } = React;
 
 // === Supabase config (publishable / anon key — safe for frontend) ===
