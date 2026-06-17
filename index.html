@@ -132,7 +132,6 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(null);
   const [editing, setEditing] = useState(null);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
-  const [exportOpen, setExportOpen] = useState(false);
 
   const loadMeetings = async () => {
     setLoading(true);
@@ -155,7 +154,7 @@ function App() {
       if (filters.type && m.meeting_type !== filters.type) return false;
       if (filters.status && m.status !== filters.status) return false;
       if (q) {
-        const hay = [m.customer_name, m.area, m.address, m.remarks, m.sj, m.support_name, m.mobile_number]
+        const hay = [m.customer_name, m.area, m.remarks, m.sj, m.support_name, m.mobile_number]
           .filter(Boolean).join(" ").toLowerCase();
         if (!hay.includes(q)) return false;
       }
@@ -209,12 +208,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-gray-900">
-      <Header
-        view={view}
-        setView={setView}
-        onAddNew={() => setEditing({ meeting_date: toISO(new Date()), meeting_type: "1st Meeting" })}
-        onExport={() => setExportOpen(true)}
-      />
+      <Header view={view} setView={setView} onAddNew={() => setEditing({ meeting_date: toISO(new Date()), meeting_type: "1st Meeting" })} />
 
       {loading && (
         <div className="flex items-center justify-center py-24">
@@ -272,10 +266,6 @@ function App() {
         />
       )}
 
-      {exportOpen && (
-        <ExportModal meetings={meetings} onClose={() => setExportOpen(false)} />
-      )}
-
       <Footer />
     </div>
   );
@@ -284,7 +274,7 @@ function App() {
 // =========================================================
 //                       Header
 // =========================================================
-function Header({ view, setView, onAddNew, onExport }) {
+function Header({ view, setView, onAddNew }) {
   return (
     <header className="bg-white border-b border-gray-200 shadow-soft sticky top-0 z-30">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 flex flex-row items-center gap-3 justify-between">
@@ -301,10 +291,6 @@ function Header({ view, setView, onAddNew, onExport }) {
             <button onClick={() => setView("calendar")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition ${view === "calendar" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>Calendar</button>
             <button onClick={() => setView("list")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition ${view === "list" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>List</button>
           </div>
-          <button onClick={onExport} title="Export to CSV" className="px-3 sm:px-4 py-2 rounded-full border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 text-xs sm:text-sm font-semibold whitespace-nowrap inline-flex items-center gap-1.5">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" /></svg>
-            <span className="hidden sm:inline">Export</span>
-          </button>
           <button onClick={onAddNew} className="px-3 sm:px-4 py-2 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold shadow-soft whitespace-nowrap">
             <span className="sm:hidden">+ New</span>
             <span className="hidden sm:inline">+ New Meeting</span>
@@ -595,7 +581,6 @@ function MeetingCard({ meeting: m, onEdit }) {
           <Field label="Status">{m.status || "—"}</Field>
           <Field label="Scheduled by">{m.scheduled_by || "—"}</Field>
           <Field label="Recording">{m.recording || "—"}</Field>
-          {m.address && <Field label="Address" wide>{m.address}</Field>}
           {m.recording_reason && <Field label="Reason (no rec.)" wide>{m.recording_reason}</Field>}
           {m.remarks && <Field label="Remarks" wide>{m.remarks}</Field>}
           {m.sj && <Field label="Sales Journal" wide>{m.sj}</Field>}
@@ -674,7 +659,6 @@ function ListView({ meetings, onEdit }) {
               <SortHeader field="customer_name">Customer</SortHeader>
               <SortHeader field="mobile_number">Mobile</SortHeader>
               <SortHeader field="area">Area</SortHeader>
-              <SortHeader field="address">Address</SortHeader>
               <SortHeader field="windows">Windows</SortHeader>
               <SortHeader field="designer_name">Designer</SortHeader>
               <SortHeader field="support_name">Support</SortHeader>
@@ -698,7 +682,6 @@ function ListView({ meetings, onEdit }) {
                   <td className="px-3 py-2 whitespace-nowrap font-medium text-gray-900">{m.customer_name || "—"}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-600">{m.mobile_number || "—"}</td>
                   <td className="px-3 py-2 text-gray-700">{m.area || "—"}</td>
-                  <td className="px-3 py-2 max-w-[220px] truncate text-gray-700" title={m.address || ""}>{m.address || "—"}</td>
                   <td className="px-3 py-2 text-center text-gray-700">{m.windows ?? "—"}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-700">{m.designer_name || "—"}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-700">{m.support_name || "—"}</td>
@@ -736,7 +719,6 @@ function EditModal({ record, onClose, onSave, onDelete }) {
     customer_name: record.customer_name || "",
     mobile_number: record.mobile_number || "",
     area: record.area || "",
-    address: record.address || "",
     windows: record.windows ?? "",
     designer_name: record.designer_name || "",
     support_name: record.support_name || "",
@@ -834,7 +816,6 @@ function EditModal({ record, onClose, onSave, onDelete }) {
           <Input label="Mobile Number" type="tel" inputMode="tel" value={form.mobile_number} onChange={set("mobile_number")} />
           <Input label="Area" value={form.area} onChange={set("area")} />
           <Input label="# Windows" type="number" inputMode="numeric" min="0" value={form.windows} onChange={set("windows")} />
-          <Input label="Address" placeholder="Flat / building / street" value={form.address} onChange={set("address")} wide />
           <Select label="Designer Name" value={form.designer_name} onChange={set("designer_name")} options={DESIGNERS} allowEmpty />
           <Input label="Support Name" value={form.support_name} onChange={set("support_name")} />
           <Select label="Meeting Type" value={form.meeting_type} onChange={set("meeting_type")} options={MEETING_TYPES} />
@@ -874,171 +855,6 @@ function EditModal({ record, onClose, onSave, onDelete }) {
           </div>
         </div>
       </form>
-    </div>
-  );
-}
-
-// =========================================================
-//                       Export Modal
-// =========================================================
-// Range helpers — return YYYY-MM-DD strings for inclusive [from, to]
-function rangeForPreset(preset) {
-  const t = new Date();
-  const y = t.getFullYear(), m = t.getMonth(), d = t.getDate();
-  if (preset === "week") {
-    // Week = Monday → Sunday containing today
-    const dow = (t.getDay() + 6) % 7; // 0 = Mon … 6 = Sun
-    const from = new Date(y, m, d - dow);
-    const to = new Date(y, m, d - dow + 6);
-    return { from: toISO(from), to: toISO(to) };
-  }
-  if (preset === "month") {
-    const from = new Date(y, m, 1);
-    const to = new Date(y, m + 1, 0);
-    return { from: toISO(from), to: toISO(to) };
-  }
-  if (preset === "year") {
-    return { from: `${y}-01-01`, to: `${y}-12-31` };
-  }
-  return { from: toISO(t), to: toISO(t) };
-}
-
-// Quote a value for CSV (RFC 4180 — wrap in "" if needed, escape internal quotes)
-function csvCell(v) {
-  if (v == null) return "";
-  const s = String(v);
-  if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
-  return s;
-}
-
-function downloadCSV(filename, rows, columns) {
-  const header = columns.map(c => csvCell(c.label)).join(",");
-  const body = rows.map(r => columns.map(c => csvCell(c.get(r))).join(",")).join("\r\n");
-  const csv = "﻿" + header + "\r\n" + body; // BOM so Excel opens UTF-8 cleanly
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-const EXPORT_COLUMNS = [
-  { label: "Date",          get: m => m.meeting_date },
-  { label: "Time From",     get: m => m.timing_from || m.timing || "" },
-  { label: "Time To",       get: m => m.timing_to || "" },
-  { label: "Customer",      get: m => m.customer_name },
-  { label: "Mobile",        get: m => m.mobile_number },
-  { label: "Area",          get: m => m.area },
-  { label: "Address",       get: m => m.address },
-  { label: "Windows",       get: m => m.windows },
-  { label: "Designer",      get: m => m.designer_name },
-  { label: "Support",       get: m => m.support_name },
-  { label: "Meeting Type",  get: m => m.meeting_type },
-  { label: "Status",        get: m => m.status },
-  { label: "Scheduled By",  get: m => m.scheduled_by },
-  { label: "Recording",     get: m => m.recording },
-  { label: "Reason",        get: m => m.recording_reason },
-  { label: "Remarks",       get: m => m.remarks },
-  { label: "Sales Journal", get: m => m.sj },
-];
-
-function ExportModal({ meetings, onClose }) {
-  const today = toISO(new Date());
-  const [preset, setPreset] = useState("month");
-  const [from, setFrom]     = useState(rangeForPreset("month").from);
-  const [to, setTo]         = useState(rangeForPreset("month").to);
-
-  const applyPreset = (p) => {
-    setPreset(p);
-    if (p !== "custom") {
-      const r = rangeForPreset(p);
-      setFrom(r.from);
-      setTo(r.to);
-    }
-  };
-
-  const inRange = meetings.filter(m => m.meeting_date >= from && m.meeting_date <= to);
-
-  const handleExport = () => {
-    if (inRange.length === 0) {
-      alert("No meetings in the selected range.");
-      return;
-    }
-    const sorted = [...inRange].sort((a, b) => (a.meeting_date < b.meeting_date ? -1 : 1));
-    const filename = `dmoksha_meetings_${from}_to_${to}.csv`;
-    downloadCSV(filename, sorted, EXPORT_COLUMNS);
-    onClose();
-  };
-
-  const PresetButton = ({ id, children }) => (
-    <button
-      type="button"
-      onClick={() => applyPreset(id)}
-      className={`px-3 py-2 rounded-lg border text-sm font-medium transition ${
-        preset === id
-          ? "bg-blue-600 text-white border-blue-600"
-          : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
-      }`}>
-      {children}
-    </button>
-  );
-
-  return (
-    <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-end sm:items-center justify-center sm:p-4" onClick={onClose}>
-      <div
-        className="bg-white border border-gray-200 sm:rounded-xl w-full max-w-md max-h-[92vh] overflow-y-auto scrollbar-thin shadow-card flex flex-col rounded-t-2xl sm:rounded-2xl"
-        onClick={e => e.stopPropagation()}>
-        <div className="sm:hidden flex justify-center pt-2 pb-1">
-          <div className="w-10 h-1 bg-gray-300 rounded-full" />
-        </div>
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
-          <h3 className="text-base sm:text-lg font-semibold text-gray-900">Export to CSV</h3>
-          <button type="button" onClick={onClose} aria-label="Close" className="w-9 h-9 rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-900 text-2xl leading-none inline-flex items-center justify-center">×</button>
-        </div>
-        <div className="p-4 space-y-4">
-          <div>
-            <div className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-2">Date range</div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <PresetButton id="week">This week</PresetButton>
-              <PresetButton id="month">This month</PresetButton>
-              <PresetButton id="year">This year</PresetButton>
-              <PresetButton id="custom">Custom</PresetButton>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="text-xs uppercase tracking-wider text-gray-500 font-semibold">From</span>
-              <input type="date" value={from} onChange={e => { setPreset("custom"); setFrom(e.target.value); }}
-                className="mt-1 w-full bg-white border border-gray-300 rounded-md px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
-            </label>
-            <label className="block">
-              <span className="text-xs uppercase tracking-wider text-gray-500 font-semibold">To</span>
-              <input type="date" value={to} onChange={e => { setPreset("custom"); setTo(e.target.value); }}
-                className="mt-1 w-full bg-white border border-gray-300 rounded-md px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
-            </label>
-          </div>
-          <div className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-3">
-            <span className="font-semibold text-gray-900">{inRange.length}</span> meeting{inRange.length === 1 ? "" : "s"} will be exported
-            {inRange.length > 0 && (
-              <span className="text-gray-500"> ({from} → {to})</span>
-            )}
-          </div>
-        </div>
-        <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 pb-safe flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
-          <button type="button" onClick={onClose}
-            className="w-full sm:w-auto px-4 py-3 rounded-lg bg-white hover:bg-gray-50 text-sm border border-gray-300 text-gray-700 font-medium min-h-[44px]">
-            Cancel
-          </button>
-          <button type="button" onClick={handleExport} disabled={inRange.length === 0}
-            className="w-full sm:w-auto px-5 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-soft disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]">
-            Download CSV
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
