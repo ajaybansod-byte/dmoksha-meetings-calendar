@@ -64,6 +64,8 @@ const MEETING_TYPES = ["1st Meeting", "2nd Meeting", "3rd Meeting", "4th Meeting
 const STATUSES = ["Converted", "Dropped", "Ongoing", "Estimate sent", "Estimate Pending", "2nd meeting pending", "Office visit"];
 const RECORDING_OPTS = ["Yes", "No"];
 const DESIGNERS = ["Janvi Shah", "Ritika Baijal", "Tarannum Momin"];
+const HOME_OWNERSHIP = ["Rented", "Owned"];
+const BUDGET_RANGES = ["₹10K - ₹15K", "₹15K - ₹20K", "₹20K - ₹25K", "Above ₹25K"];
 
 // === Time helpers ===
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));            // ["1","2",...,"12"]
@@ -602,6 +604,9 @@ function MeetingCard({ meeting: m, onEdit }) {
           <Field label="Status">{m.status || "—"}</Field>
           <Field label="Scheduled by">{m.scheduled_by || "—"}</Field>
           <Field label="Recording">{m.recording || "—"}</Field>
+          {m.home_ownership && <Field label="Home">{m.home_ownership}</Field>}
+          {m.budget_per_curtain && <Field label="Budget / curtain">{m.budget_per_curtain}</Field>}
+          {(m.curtains_required ?? null) !== null && m.curtains_required !== "" && <Field label="Curtains required">{m.curtains_required}</Field>}
           {m.address && <Field label="Address" wide>{m.address}</Field>}
           {m.recording_reason && <Field label="Reason (no rec.)" wide>{m.recording_reason}</Field>}
           {m.remarks && <Field label="Remarks" wide>{m.remarks}</Field>}
@@ -683,6 +688,9 @@ function ListView({ meetings, onEdit }) {
               <SortHeader field="area">Area</SortHeader>
               <SortHeader field="address">Address</SortHeader>
               <SortHeader field="windows">Windows</SortHeader>
+              <SortHeader field="home_ownership">Home</SortHeader>
+              <SortHeader field="budget_per_curtain">Budget</SortHeader>
+              <SortHeader field="curtains_required">Curtains</SortHeader>
               <SortHeader field="designer_name">Designer</SortHeader>
               <SortHeader field="support_name">Support</SortHeader>
               <SortHeader field="meeting_type">Type</SortHeader>
@@ -707,6 +715,9 @@ function ListView({ meetings, onEdit }) {
                   <td className="px-3 py-2 text-gray-700">{m.area || "—"}</td>
                   <td className="px-3 py-2 max-w-[220px] truncate text-gray-700" title={m.address || ""}>{m.address || "—"}</td>
                   <td className="px-3 py-2 text-center text-gray-700">{m.windows ?? "—"}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-700">{m.home_ownership || "—"}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-700">{m.budget_per_curtain || "—"}</td>
+                  <td className="px-3 py-2 text-center text-gray-700">{m.curtains_required ?? "—"}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-700">{m.designer_name || "—"}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-700">{m.support_name || "—"}</td>
                   <td className="px-3 py-2 whitespace-nowrap">
@@ -745,6 +756,9 @@ function EditModal({ record, onClose, onSave, onDelete }) {
     area: record.area || "",
     address: record.address || "",
     windows: record.windows ?? "",
+    home_ownership: record.home_ownership || "",
+    budget_per_curtain: record.budget_per_curtain || "",
+    curtains_required: record.curtains_required ?? "",
     designer_name: record.designer_name || "",
     support_name: record.support_name || "",
     meeting_type: record.meeting_type || "1st Meeting",
@@ -842,6 +856,9 @@ function EditModal({ record, onClose, onSave, onDelete }) {
           <Input label="Area" value={form.area} onChange={set("area")} />
           <Input label="# Windows" type="number" inputMode="numeric" min="0" value={form.windows} onChange={set("windows")} />
           <Input label="Address" placeholder="Flat / building / street" value={form.address} onChange={set("address")} wide />
+          <Select label="Home" value={form.home_ownership} onChange={set("home_ownership")} options={HOME_OWNERSHIP} allowEmpty />
+          <Select label="Budget per curtain" value={form.budget_per_curtain} onChange={set("budget_per_curtain")} options={BUDGET_RANGES} allowEmpty />
+          <Input label="Curtains required" type="number" inputMode="numeric" min="0" value={form.curtains_required} onChange={set("curtains_required")} />
           <Select label="Designer Name" value={form.designer_name} onChange={set("designer_name")} options={DESIGNERS} allowEmpty />
           <Input label="Support Name" value={form.support_name} onChange={set("support_name")} />
           <Select label="Meeting Type" value={form.meeting_type} onChange={set("meeting_type")} options={MEETING_TYPES} />
@@ -992,6 +1009,9 @@ const EXPORT_COLUMNS = [
   { label: "Area",          get: m => m.area },
   { label: "Address",       get: m => m.address },
   { label: "Windows",       get: m => m.windows },
+  { label: "Home",          get: m => m.home_ownership },
+  { label: "Budget",        get: m => m.budget_per_curtain },
+  { label: "Curtains",      get: m => m.curtains_required },
   { label: "Designer",      get: m => m.designer_name },
   { label: "Support",       get: m => m.support_name },
   { label: "Meeting Type",  get: m => m.meeting_type },
