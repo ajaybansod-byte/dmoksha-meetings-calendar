@@ -1040,6 +1040,8 @@ function downloadCSV(filename, rows, columns) {
 }
 
 const EXPORT_COLUMNS = [
+  { label: "Status",        get: m => m.deleted_at ? "Inactive" : "Active" },
+  { label: "Deleted On",    get: m => m.deleted_at ? new Date(m.deleted_at).toLocaleString() : "" },
   { label: "Date",          get: m => m.meeting_date },
   { label: "Time From",     get: m => m.timing_from || m.timing || "" },
   { label: "Time To",       get: m => m.timing_to || "" },
