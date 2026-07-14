@@ -1092,7 +1092,7 @@ function downloadCSV(filename, rows, columns) {
 
 const EXPORT_COLUMNS = [
   { label: "City",          get: m => m.location || "Mumbai" },
-  { label: "Status",        get: m => m.deleted_at ? "Inactive" : "Active" },
+  { label: "Customer Status", get: m => m.deleted_at ? "Inactive" : "Active" },
   { label: "Deleted On",    get: m => m.deleted_at ? new Date(m.deleted_at).toLocaleString() : "" },
   { label: "Date",          get: m => m.meeting_date },
   { label: "Time From",     get: m => m.timing_from || m.timing || "" },
@@ -1108,7 +1108,7 @@ const EXPORT_COLUMNS = [
   { label: "Designer",      get: m => m.designer_name },
   { label: "Support",       get: m => m.support_name },
   { label: "Meeting Type",  get: m => m.meeting_type },
-  { label: "Status",        get: m => m.status },
+  { label: "Meeting Status", get: m => m.status },
   { label: "Scheduled By",  get: m => m.scheduled_by },
   { label: "Recording",     get: m => m.recording },
   { label: "Reason",        get: m => m.recording_reason },
