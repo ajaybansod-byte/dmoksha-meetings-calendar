@@ -64,6 +64,7 @@ const MEETING_TYPES = ["1st Meeting", "2nd Meeting", "3rd Meeting", "4th Meeting
 const STATUSES = ["Converted", "Dropped", "Ongoing", "Estimate sent", "Estimate Pending", "2nd meeting pending", "Office visit"];
 const RECORDING_OPTS = ["Yes", "No"];
 const DESIGNERS = ["Janvi Shah", "Neha Agarwal", "Ritika Baijal", "Tarannum Momin"];
+const CITIES = ["Mumbai", "Pune", "Bhubaneswar"];
 const HOME_OWNERSHIP = ["Rented", "Owned"];
 const BUDGET_RANGES = ["₹10K - ₹15K", "₹15K - ₹20K", "₹20K - ₹25K", "Above ₹25K"];
 
@@ -142,6 +143,8 @@ function App() {
   const [editing, setEditing] = useState(null);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [exportOpen, setExportOpen] = useState(false);
+  const [city, setCity] = useState(() => { try { const v = localStorage.getItem("dmoksha.city"); return CITIES.includes(v) ? v : "Mumbai"; } catch { return "Mumbai"; } });
+  useEffect(() => { try { localStorage.setItem("dmoksha.city", city); } catch {} }, [city]);
 
   const loadMeetings = async () => {
     setLoading(true);
@@ -161,6 +164,7 @@ function App() {
     const q = (filters.q || "").toLowerCase();
     return meetings.filter(m => {
       if (m.deleted_at) return false; // hide soft-deleted from Calendar/List/Export
+      if ((m.location || "Mumbai") !== city) return false; // scope to selected city
       if (filters.designer && m.designer_name !== filters.designer) return false;
       if (filters.type && m.meeting_type !== filters.type) return false;
       if (filters.status && m.status !== filters.status) return false;
@@ -171,12 +175,23 @@ function App() {
       }
       return true;
     });
-  }, [meetings, filters]);
+  }, [meetings, filters, city]);
 
   const deletedMeetings = useMemo(
-    () => meetings.filter(m => m.deleted_at).sort((a, b) => (b.deleted_at || "").localeCompare(a.deleted_at || "")),
-    [meetings]
+    () => meetings.filter(m => m.deleted_at && (m.location || "Mumbai") === city).sort((a, b) => (b.deleted_at || "").localeCompare(a.deleted_at || "")),
+    [meetings, city]
   );
+
+  const cityActiveCount = useMemo(
+    () => meetings.filter(m => !m.deleted_at && (m.location || "Mumbai") === city).length,
+    [meetings, city]
+  );
+  const cityCounts = useMemo(() => {
+    const c = {};
+    CITIES.forEach(k => c[k] = 0);
+    meetings.forEach(m => { if (m.deleted_at) return; const loc = m.location || "Mumbai"; if (c[loc] !== undefined) c[loc]++; });
+    return c;
+  }, [meetings]);
 
   const meetingsByDate = useMemo(() => {
     const map = {};
@@ -249,7 +264,7 @@ function App() {
       <Header
         view={view}
         setView={setView}
-        onAddNew={() => setEditing({ meeting_date: toISO(new Date()), meeting_type: "1st Meeting" })}
+        onAddNew={() => setEditing({ meeting_date: toISO(new Date()), meeting_type: "1st Meeting", location: city })}
         onExport={() => setExportOpen(true)}
         deletedCount={deletedMeetings.length}
       />
@@ -267,12 +282,13 @@ function App() {
 
       {!loading && !error && (
         <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
+          <CityToggle city={city} setCity={setCity} counts={cityCounts} />
           {view !== "trash" && (
             <FilterBar
               meetings={meetings}
               filters={filters}
               setFilters={setFilters}
-              totalCount={meetings.length}
+              totalCount={cityActiveCount}
               filteredCount={filteredMeetings.length}
             />
           )}
@@ -301,7 +317,7 @@ function App() {
           meetings={meetingsByDate[selectedDate] || []}
           onClose={() => setSelectedDate(null)}
           onEdit={(m) => { setSelectedDate(null); setEditing(m); }}
-          onAdd={() => { setSelectedDate(null); setEditing({ meeting_date: selectedDate, meeting_type: "1st Meeting" }); }}
+          onAdd={() => { setSelectedDate(null); setEditing({ meeting_date: selectedDate, meeting_type: "1st Meeting", location: city }); }}
         />
       )}
 
@@ -315,7 +331,7 @@ function App() {
       )}
 
       {exportOpen && (
-        <ExportModal meetings={meetings} onClose={() => setExportOpen(false)} />
+        <ExportModal meetings={meetings.filter(m => (m.location || "Mumbai") === city)} onClose={() => setExportOpen(false)} />
       )}
 
       <Footer />
@@ -790,6 +806,7 @@ function ListView({ meetings, onEdit }) {
 function EditModal({ record, onClose, onSave, onDelete }) {
   const [form, setForm] = useState({
     meeting_date: record.meeting_date || "",
+    location: record.location || "Mumbai",
     customer_name: record.customer_name || "",
     mobile_number: record.mobile_number || "",
     area: record.area || "",
@@ -881,6 +898,7 @@ function EditModal({ record, onClose, onSave, onDelete }) {
 
         {/* Form fields — single column on mobile, two on sm+. min-w-0 prevents grid overflow. */}
         <div className="p-3 sm:p-5 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 flex-1">
+          <Select label="City" value={form.location} onChange={set("location")} options={CITIES} wide />
           <Input label="Date *" type="date" value={form.meeting_date} onChange={set("meeting_date")} required />
           <div className="hidden sm:block" />{/* spacer to keep date on its own row on desktop */}
           <TimeRangePicker
@@ -995,6 +1013,39 @@ function TimeRangePicker({ valueFrom, valueTo, onChangeFrom, onChangeTo, wide })
 }
 
 // =========================================================
+//                       City Toggle
+// =========================================================
+function CityToggle({ city, setCity, counts }) {
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2">
+      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider mr-1">City</span>
+      <div className="inline-flex rounded-full overflow-hidden border border-gray-300 bg-gray-50 shadow-soft">
+        {CITIES.map((c) => {
+          const active = city === c;
+          const count = counts ? counts[c] ?? 0 : null;
+          return (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setCity(c)}
+              className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition inline-flex items-center gap-1.5 ${
+                active ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"
+              }`}>
+              {c}
+              {count !== null && (
+                <span className={`inline-flex items-center justify-center rounded-full text-[10px] font-semibold px-1.5 min-w-[18px] h-[18px] ${
+                  active ? "bg-white text-blue-600" : "bg-gray-200 text-gray-700"
+                }`}>{count}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// =========================================================
 //                       Export Modal
 // =========================================================
 function rangeForPreset(preset) {
@@ -1040,6 +1091,7 @@ function downloadCSV(filename, rows, columns) {
 }
 
 const EXPORT_COLUMNS = [
+  { label: "City",          get: m => m.location || "Mumbai" },
   { label: "Status",        get: m => m.deleted_at ? "Inactive" : "Active" },
   { label: "Deleted On",    get: m => m.deleted_at ? new Date(m.deleted_at).toLocaleString() : "" },
   { label: "Date",          get: m => m.meeting_date },
