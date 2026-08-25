@@ -50,7 +50,11 @@ const SUPABASE_KEY = "sb_publishable_Mm7ImJtTtEQIAR9KK1DLzw_QGkhptKA";
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // === Meeting-type color palette ===
-const meetingColor = (type) => {
+const meetingColor = (type, status) => {
+  // Status override: Office visits are teal so they pop against meeting-type colors.
+  if ((status || "").toLowerCase() === "office visit") {
+    return { chipBg: "bg-teal-500", text: "text-white", border: "border-teal-600", barBg: "bg-teal-500", barText: "text-white", dot: "bg-teal-500" };
+  }
   const t = (type || "").toLowerCase();
   if (t.startsWith("1")) return { chipBg: "bg-yellow-300",  text: "text-yellow-900", border: "border-yellow-400", barBg: "bg-yellow-300",  barText: "text-yellow-900", dot: "bg-yellow-400" };
   if (t.startsWith("2")) return { chipBg: "bg-orange-400",  text: "text-orange-950", border: "border-orange-500", barBg: "bg-orange-400",  barText: "text-orange-950", dot: "bg-orange-500" };
@@ -531,7 +535,7 @@ function DayCell({ day, isToday, meetings, hasRightBorder, onClick }) {
       {/* MOBILE: row of colored dots */}
       <div className="sm:hidden flex flex-wrap items-center gap-0.5 mt-auto">
         {dotsShown.map((m, idx) => {
-          const c = meetingColor(m.meeting_type);
+          const c = meetingColor(m.meeting_type, m.status);
           return <span key={idx} className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />;
         })}
         {dotOverflow > 0 && (
@@ -542,7 +546,7 @@ function DayCell({ day, isToday, meetings, hasRightBorder, onClick }) {
       {/* DESKTOP: chip previews */}
       <div className="hidden sm:flex flex-col gap-1 overflow-hidden">
         {meetings.slice(0, 3).map(m => {
-          const c = meetingColor(m.meeting_type);
+          const c = meetingColor(m.meeting_type, m.status);
           return (
             <div key={m.id} className={`${c.chipBg} ${c.text} rounded px-1.5 py-0.5 text-[10px] leading-tight`} title={`${m.designer_name || ""} – ${m.customer_name || ""}`}>
               <div className="font-semibold truncate">{m.designer_name || "—"} · {m.customer_name || "—"}</div>
@@ -563,18 +567,19 @@ function DayCell({ day, isToday, meetings, hasRightBorder, onClick }) {
 // =========================================================
 function Legend() {
   const items = [
-    { label: "1st", c: "bg-yellow-300" },
-    { label: "2nd", c: "bg-orange-400" },
-    { label: "3rd", c: "bg-red-500" },
-    { label: "4th", c: "bg-rose-700" },
-    { label: "5th+", c: "bg-purple-700" },
+    { label: "1st Meeting", c: "bg-yellow-300" },
+    { label: "2nd Meeting", c: "bg-orange-400" },
+    { label: "3rd Meeting", c: "bg-red-500" },
+    { label: "4th Meeting", c: "bg-rose-700" },
+    { label: "5th+ Meeting", c: "bg-purple-700" },
+    { label: "Office visit", c: "bg-teal-500" },
   ];
   return (
     <div className="mt-4 sm:mt-5 flex flex-wrap gap-2 sm:gap-3 text-xs text-gray-600">
       <span className="font-semibold text-gray-700">Color key:</span>
       {items.map(i => (
         <span key={i.label} className="inline-flex items-center gap-1.5">
-          <span className={`w-3 h-3 rounded ${i.c} inline-block border border-gray-300`} /> {i.label} Meeting
+          <span className={`w-3 h-3 rounded ${i.c} inline-block border border-gray-300`} /> {i.label}
         </span>
       ))}
     </div>
@@ -624,7 +629,7 @@ function DayPanel({ date, meetings, onClose, onEdit, onAdd }) {
 }
 
 function MeetingCard({ meeting: m, onEdit }) {
-  const c = meetingColor(m.meeting_type);
+  const c = meetingColor(m.meeting_type, m.status);
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -760,7 +765,7 @@ function ListView({ meetings, onEdit }) {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {sorted.map(m => {
-              const c = meetingColor(m.meeting_type);
+              const c = meetingColor(m.meeting_type, m.status);
               return (
                 <tr key={m.id} className="hover:bg-gray-50">
                   <td className="px-3 py-2 whitespace-nowrap font-mono text-gray-700">{m.meeting_date}</td>
@@ -1236,7 +1241,7 @@ function TrashView({ meetings, onRestore, onHardDelete }) {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {meetings.map(m => {
-              const c = meetingColor(m.meeting_type);
+              const c = meetingColor(m.meeting_type, m.status);
               const del = m.deleted_at ? new Date(m.deleted_at) : null;
               const delStr = del ? `${del.toLocaleDateString()} ${del.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "—";
               return (
