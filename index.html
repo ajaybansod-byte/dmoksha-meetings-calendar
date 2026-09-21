@@ -1274,8 +1274,8 @@ function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVi
     .map(v => ({ kind: "visit", id: v.id, customer: v.customer_name || "", address: v.address || "", stylist: v.stylist || "", support: v.support_name || "", visit: v.visit_type || "", time: v.timing || "", status: v.status || "", raw: v }));
   const rows = [...mRows, ...vRows].sort((a, b) => (timeToMinutes(a.time) ?? 9999) - (timeToMinutes(b.time) ?? 9999));
 
-  const SHEET_HEADERS = ["Date", "Customer name", "Address", "Stylist", "Support staff name", "Visit type", "Time", "Status"];
-  const sheetLines = () => rows.map(r => [fmtSheetDate(date), r.customer, r.address, r.stylist, r.support, r.visit, r.time, r.status]);
+  const SHEET_HEADERS = ["Date", "Customer name", "Address", "Stylist", "Support staff name", "Visit type", "Time"];
+  const sheetLines = () => rows.map(r => [fmtSheetDate(date), r.customer, r.address, r.stylist, r.support, r.visit, r.time]);
 
   const copyForSheet = async () => {
     const text = sheetLines().map(l => l.join("\t")).join("\n");
@@ -1314,7 +1314,7 @@ function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVi
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
-              {["Time", "Customer", "Address", "Stylist", "Support staff", "Visit type", "Status", ""].map((h, i) => (
+              {["Time", "Customer", "Address", "Stylist", "Support staff", "Visit type", ""].map((h, i) => (
                 <th key={i} className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-600 whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -1342,13 +1342,6 @@ function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVi
                     {VISIT_TYPES.map(n => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </td>
-                <td className="px-3 py-2 min-w-[150px]">
-                  <select value={r.status} onChange={e => setField(r, "status", e.target.value)} className={selCls}>
-                    <option value="">— select —</option>
-                    {r.status && !STATUSES.includes(r.status) && <option value={r.status}>{r.status}</option>}
-                    {STATUSES.map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </td>
                 <td className="px-3 py-2 whitespace-nowrap">
                   {r.kind === "meeting"
                     ? <button onClick={() => onEditMeeting(r.raw)} className="text-blue-600 hover:text-blue-800 text-xs font-semibold">Edit</button>
@@ -1357,7 +1350,7 @@ function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVi
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan="8" className="text-center py-12 text-gray-500">No meetings or visits on {fmtSheetDate(date)} in {city}. Use "+ Add visit" for installations, measurements or collections.</td></tr>
+              <tr><td colSpan="7" className="text-center py-12 text-gray-500">No meetings or visits on {fmtSheetDate(date)} in {city}. Use "+ Add visit" for installations, measurements or collections.</td></tr>
             )}
           </tbody>
         </table>
@@ -1394,8 +1387,7 @@ function AddVisitModal({ date, onClose, onSave }) {
           <Input label="Address" value={form.address} onChange={set("address")} wide />
           <Select label="Stylist" value={form.stylist} onChange={set("stylist")} options={DESIGNERS} allowEmpty />
           <Select label="Support staff" value={form.support_name} onChange={set("support_name")} options={SUPPORT_STAFF} allowEmpty />
-          <Select label="Visit type" value={form.visit_type} onChange={set("visit_type")} options={VISIT_TYPES} />
-          <Select label="Status" value={form.status} onChange={set("status")} options={STATUSES} allowEmpty />
+          <Select label="Visit type" value={form.visit_type} onChange={set("visit_type")} options={VISIT_TYPES} wide />
         </div>
         <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 pb-safe flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
           <button type="button" onClick={onClose} className="w-full sm:w-auto px-4 py-3 rounded-lg bg-white hover:bg-gray-50 text-sm border border-gray-300 text-gray-700 font-medium min-h-[44px]">Cancel</button>
