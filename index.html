@@ -69,6 +69,8 @@ const STATUSES = ["Converted", "Dropped", "Ongoing", "Estimate sent", "Estimate 
 const RECORDING_OPTS = ["Yes", "No"];
 const DESIGNERS = ["Janvi Shah", "Neha Agarwal", "Ritika Baijal", "Tarannum Momin"];
 const CITIES = ["Mumbai", "Pune", "Bhubaneswar"];
+const SUPPORT_STAFF = ["Dharmveer", "Mohit", "Regan", "Shanjit", "Sunil"];
+const VISIT_TYPES = ["Meeting", "Measurement", "Installation", "Track installation", "Collection for alteration", "Cash collection", "Upholstery"];
 const HOME_OWNERSHIP = ["Rented", "Owned"];
 const BUDGET_RANGES = ["₹10K - ₹15K", "₹15K - ₹20K", "₹20K - ₹25K", "Above ₹25K"];
 
@@ -147,6 +149,7 @@ function App() {
   const [editing, setEditing] = useState(null);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [exportOpen, setExportOpen] = useState(false);
+  const [fieldVisits, setFieldVisits] = useState([]);
   const [city, setCity] = useState(() => { try { const v = localStorage.getItem("dmoksha.city"); return CITIES.includes(v) ? v : "Mumbai"; } catch { return "Mumbai"; } });
   useEffect(() => { try { localStorage.setItem("dmoksha.city", city); } catch {} }, [city]);
 
@@ -162,7 +165,11 @@ function App() {
     setLoading(false);
   };
 
-  useEffect(() => { loadMeetings(); }, []);
+  const loadFieldVisits = async () => {
+    const { data, error } = await supabase.from("field_visits").select("*").order("visit_date", { ascending: true });
+    if (!error) setFieldVisits(data || []);
+  };
+  useEffect(() => { loadMeetings(); loadFieldVisits(); }, []);
 
   const filteredMeetings = useMemo(() => {
     const q = (filters.q || "").toLowerCase();
@@ -263,6 +270,31 @@ function App() {
     await loadMeetings();
   };
 
+  // ---- Scheduling tab handlers ----
+  const updateMeetingField = async (id, field, value) => {
+    const { error } = await supabase.from("designer_meetings").update({ [field]: value || null }).eq("id", id);
+    if (error) { alert("Update failed: " + error.message); return; }
+    setMeetings(ms => ms.map(m => m.id === id ? { ...m, [field]: value || null } : m));
+  };
+  const updateVisitField = async (id, field, value) => {
+    const { error } = await supabase.from("field_visits").update({ [field]: value || null }).eq("id", id);
+    if (error) { alert("Update failed: " + error.message); return; }
+    setFieldVisits(vs => vs.map(v => v.id === id ? { ...v, [field]: value || null } : v));
+  };
+  const addFieldVisit = async (payload) => {
+    const clean = {};
+    Object.keys(payload).forEach(k => { clean[k] = payload[k] === "" ? null : payload[k]; });
+    const { error } = await supabase.from("field_visits").insert({ ...clean, city });
+    if (error) throw new Error(error.message || "Could not add visit");
+    await loadFieldVisits();
+  };
+  const deleteFieldVisit = async (id) => {
+    if (!confirm("Remove this visit from the schedule?")) return;
+    const { error } = await supabase.from("field_visits").delete().eq("id", id);
+    if (error) { alert("Delete failed: " + error.message); return; }
+    await loadFieldVisits();
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-gray-900">
       <Header
@@ -287,7 +319,7 @@ function App() {
       {!loading && !error && (
         <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
           <CityToggle city={city} setCity={setCity} counts={cityCounts} />
-          {view !== "trash" && (
+          {view !== "trash" && view !== "schedule" && (
             <FilterBar
               meetings={meetings}
               filters={filters}
@@ -308,10 +340,21 @@ function App() {
             />
           ) : view === "list" ? (
             <ListView meetings={filteredMeetings} onEdit={(m) => setEditing(m)} />
+          ) : view === "schedule" ? (
+            <ScheduleView
+              meetings={meetings}
+              fieldVisits={fieldVisits}
+              city={city}
+              onUpdateMeeting={updateMeetingField}
+              onUpdateVisit={updateVisitField}
+              onAddVisit={addFieldVisit}
+              onDeleteVisit={deleteFieldVisit}
+              onEditMeeting={(m) => setEditing(m)}
+            />
           ) : (
             <TrashView meetings={deletedMeetings} onRestore={handleRestore} onHardDelete={handleHardDelete} />
           )}
-          {view !== "trash" && <Legend />}
+          {view !== "trash" && view !== "schedule" && <Legend />}
         </main>
       )}
 
@@ -362,6 +405,7 @@ function Header({ view, setView, onAddNew, onExport, deletedCount }) {
           <div className="flex rounded-full overflow-hidden border border-gray-300 bg-gray-50">
             <button onClick={() => setView("calendar")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition ${view === "calendar" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>Calendar</button>
             <button onClick={() => setView("list")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition ${view === "list" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>List</button>
+            <button onClick={() => setView("schedule")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition ${view === "schedule" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>Scheduling</button>
             <button onClick={() => setView("trash")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition inline-flex items-center gap-1 ${view === "trash" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>
               Trash
               {deletedCount > 0 && (
@@ -922,7 +966,7 @@ function EditModal({ record, onClose, onSave, onDelete }) {
           <Select label="Budget per curtain" value={form.budget_per_curtain} onChange={set("budget_per_curtain")} options={BUDGET_RANGES} allowEmpty />
           <Input label="Curtains required" type="number" inputMode="numeric" min="0" value={form.curtains_required} onChange={set("curtains_required")} />
           <Select label="Designer Name" value={form.designer_name} onChange={set("designer_name")} options={DESIGNERS} allowEmpty />
-          <Input label="Support Name" value={form.support_name} onChange={set("support_name")} />
+          <Select label="Support Name" value={form.support_name} onChange={set("support_name")} options={form.support_name && !SUPPORT_STAFF.includes(form.support_name) ? [form.support_name, ...SUPPORT_STAFF] : SUPPORT_STAFF} allowEmpty />
           <Select label="Meeting Type" value={form.meeting_type} onChange={set("meeting_type")} options={MEETING_TYPES} />
           <Select label="Status" value={form.status} onChange={set("status")} options={STATUSES} allowEmpty />
           <Input label="Scheduled by" value={form.scheduled_by} onChange={set("scheduled_by")} />
@@ -1207,6 +1251,157 @@ function ExportModal({ meetings, onClose }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// =========================================================
+//                     Scheduling View
+// =========================================================
+const fmtSheetDate = (iso) => { const [y, m, d] = (iso || "").split("-"); return y ? `${m}/${d}/${y}` : ""; };
+
+function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVisit, onAddVisit, onDeleteVisit, onEditMeeting }) {
+  const [date, setDate] = useState(toISO(new Date()));
+  const [adding, setAdding] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const shift = (n) => { const d = new Date(date + "T00:00:00"); d.setDate(d.getDate() + n); setDate(toISO(d)); };
+
+  const mRows = meetings
+    .filter(m => !m.deleted_at && (m.location || "Mumbai") === city && m.meeting_date === date)
+    .map(m => ({ kind: "meeting", id: m.id, customer: m.customer_name || "", address: m.address || m.area || "", stylist: m.designer_name || "", support: m.support_name || "", visit: m.visit_type || "Meeting", time: m.timing_from || m.timing || "", status: m.status || "", raw: m }));
+  const vRows = fieldVisits
+    .filter(v => !v.deleted_at && (v.city || "Mumbai") === city && v.visit_date === date)
+    .map(v => ({ kind: "visit", id: v.id, customer: v.customer_name || "", address: v.address || "", stylist: v.stylist || "", support: v.support_name || "", visit: v.visit_type || "", time: v.timing || "", status: v.status || "", raw: v }));
+  const rows = [...mRows, ...vRows].sort((a, b) => (timeToMinutes(a.time) ?? 9999) - (timeToMinutes(b.time) ?? 9999));
+
+  const SHEET_HEADERS = ["Date", "Customer name", "Address", "Stylist", "Support staff name", "Visit type", "Time", "Status"];
+  const sheetLines = () => rows.map(r => [fmtSheetDate(date), r.customer, r.address, r.stylist, r.support, r.visit, r.time, r.status]);
+
+  const copyForSheet = async () => {
+    const text = sheetLines().map(l => l.join("\t")).join("\n");
+    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    catch { alert("Clipboard blocked by browser — use Download CSV instead."); }
+  };
+  const downloadSheet = () => {
+    if (rows.length === 0) { alert("Nothing scheduled on this date."); return; }
+    const cols = SHEET_HEADERS.map((label, i) => ({ label, get: r => r[i] }));
+    downloadCSV(`schedule_${city}_${date}.csv`, sheetLines(), cols);
+  };
+  const setField = (r, field, value) => r.kind === "meeting" ? onUpdateMeeting(r.id, field, value) : onUpdateVisit(r.id, field, value);
+
+  const d = new Date(date + "T00:00:00");
+  const selCls = "bg-white border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-w-0 w-full";
+  const missing = rows.filter(r => !r.support).length;
+
+  return (
+    <section>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+        <div className="flex items-center gap-2">
+          <button onClick={() => shift(-1)} className="w-9 h-9 inline-flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-700 border border-gray-300 bg-white">‹</button>
+          <input type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} className="bg-white border border-gray-300 rounded-md px-3 py-2 text-sm" />
+          <button onClick={() => shift(1)} className="w-9 h-9 inline-flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-700 border border-gray-300 bg-white">›</button>
+          <button onClick={() => setDate(toISO(new Date()))} className="px-3 py-2 rounded-md bg-white hover:bg-gray-50 text-sm border border-gray-300 text-gray-700 font-medium">Today</button>
+          <div className="text-sm text-gray-600 ml-1 hidden sm:block">{fullDayName(d)} · {rows.length} visit{rows.length === 1 ? "" : "s"}{missing > 0 && <span className="text-amber-600"> · {missing} unassigned</span>}</div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={() => setAdding(true)} className="px-3 py-2 rounded-md bg-white hover:bg-gray-50 text-sm border border-gray-300 text-gray-700 font-medium">+ Add visit</button>
+          <button onClick={copyForSheet} disabled={rows.length === 0} className="px-3 py-2 rounded-md bg-white hover:bg-gray-50 text-sm border border-gray-300 text-gray-700 font-medium disabled:opacity-50">{copied ? "Copied ✓" : "Copy for sheet"}</button>
+          <button onClick={downloadSheet} disabled={rows.length === 0} className="px-3 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50">Download CSV</button>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto scrollbar-thin rounded-xl border border-gray-200 bg-white shadow-card">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 bg-gray-50">
+              {["Time", "Customer", "Address", "Stylist", "Support staff", "Visit type", "Status", ""].map((h, i) => (
+                <th key={i} className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-600 whitespace-nowrap">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {rows.map(r => (
+              <tr key={r.kind + r.id} className={`hover:bg-gray-50 ${!r.support ? "bg-amber-50/40" : ""}`}>
+                <td className="px-3 py-2 whitespace-nowrap text-gray-700">{r.time || "—"}</td>
+                <td className="px-3 py-2 whitespace-nowrap font-medium text-gray-900">
+                  {r.customer || "—"}
+                  {r.kind === "visit" && <span className="ml-1.5 text-[10px] uppercase tracking-wider bg-gray-100 text-gray-500 rounded px-1">visit</span>}
+                </td>
+                <td className="px-3 py-2 max-w-[260px] truncate text-gray-700" title={r.address}>{r.address || "—"}</td>
+                <td className="px-3 py-2 whitespace-nowrap text-gray-700">{r.stylist || "—"}</td>
+                <td className="px-3 py-2 min-w-[140px]">
+                  <select value={r.support} onChange={e => setField(r, "support_name", e.target.value)} className={selCls}>
+                    <option value="">— assign —</option>
+                    {r.support && !SUPPORT_STAFF.includes(r.support) && <option value={r.support}>{r.support}</option>}
+                    {SUPPORT_STAFF.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </td>
+                <td className="px-3 py-2 min-w-[180px]">
+                  <select value={r.visit} onChange={e => setField(r, "visit_type", e.target.value)} className={selCls}>
+                    <option value="">— select —</option>
+                    {VISIT_TYPES.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </td>
+                <td className="px-3 py-2 min-w-[150px]">
+                  <select value={r.status} onChange={e => setField(r, "status", e.target.value)} className={selCls}>
+                    <option value="">— select —</option>
+                    {r.status && !STATUSES.includes(r.status) && <option value={r.status}>{r.status}</option>}
+                    {STATUSES.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap">
+                  {r.kind === "meeting"
+                    ? <button onClick={() => onEditMeeting(r.raw)} className="text-blue-600 hover:text-blue-800 text-xs font-semibold">Edit</button>
+                    : <button onClick={() => onDeleteVisit(r.id)} className="text-red-600 hover:text-red-800 text-xs font-semibold">Remove</button>}
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan="8" className="text-center py-12 text-gray-500">No meetings or visits on {fmtSheetDate(date)} in {city}. Use "+ Add visit" for installations, measurements or collections.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {adding && <AddVisitModal date={date} onClose={() => setAdding(false)} onSave={async (p) => { await onAddVisit(p); setAdding(false); }} />}
+    </section>
+  );
+}
+
+function AddVisitModal({ date, onClose, onSave }) {
+  const [form, setForm] = useState({ visit_date: date, customer_name: "", address: "", stylist: "", support_name: "", visit_type: "Installation", timing: "", status: "" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+  const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!form.customer_name.trim()) { setErr("Customer name is required."); return; }
+    setSaving(true); setErr(null);
+    try { await onSave(form); } catch (ex) { setErr(ex.message || "Could not save."); setSaving(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-end sm:items-center justify-center sm:p-4" onClick={onClose}>
+      <form onSubmit={submit} noValidate className="bg-white border border-gray-200 w-full max-w-lg max-h-[92vh] overflow-y-auto overflow-x-hidden scrollbar-thin shadow-card rounded-t-2xl sm:rounded-2xl" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+          <h3 className="text-base sm:text-lg font-semibold text-gray-900">Add visit</h3>
+          <button type="button" onClick={onClose} aria-label="Close" className="w-9 h-9 rounded-full hover:bg-gray-100 text-gray-500 text-2xl leading-none inline-flex items-center justify-center">×</button>
+        </div>
+        {err && <div className="mx-4 mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">{err}</div>}
+        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Input label="Date *" type="date" value={form.visit_date} onChange={set("visit_date")} />
+          <Input label="Time" placeholder="e.g. 11:00 AM" value={form.timing} onChange={set("timing")} />
+          <Input label="Customer name *" value={form.customer_name} onChange={set("customer_name")} wide />
+          <Input label="Address" value={form.address} onChange={set("address")} wide />
+          <Select label="Stylist" value={form.stylist} onChange={set("stylist")} options={DESIGNERS} allowEmpty />
+          <Select label="Support staff" value={form.support_name} onChange={set("support_name")} options={SUPPORT_STAFF} allowEmpty />
+          <Select label="Visit type" value={form.visit_type} onChange={set("visit_type")} options={VISIT_TYPES} />
+          <Select label="Status" value={form.status} onChange={set("status")} options={STATUSES} allowEmpty />
+        </div>
+        <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 pb-safe flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
+          <button type="button" onClick={onClose} className="w-full sm:w-auto px-4 py-3 rounded-lg bg-white hover:bg-gray-50 text-sm border border-gray-300 text-gray-700 font-medium min-h-[44px]">Cancel</button>
+          <button type="submit" disabled={saving} className="w-full sm:w-auto px-5 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-60 min-h-[44px]">{saving ? "Saving…" : "Add visit"}</button>
+        </div>
+      </form>
     </div>
   );
 }
