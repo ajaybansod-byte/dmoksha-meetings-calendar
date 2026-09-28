@@ -69,7 +69,12 @@ const STATUSES = ["Converted", "Dropped", "Ongoing", "Estimate sent", "Estimate 
 const RECORDING_OPTS = ["Yes", "No"];
 const DESIGNERS = ["Janvi Shah", "Neha Agarwal", "Ritika Baijal", "Tarannum Momin"];
 const CITIES = ["Mumbai", "Pune", "Bhubaneswar"];
-const SUPPORT_STAFF = ["Dharmveer", "Mohit", "Regan", "Shanjit", "Sunil"];
+const SUPPORT_STAFF_BY_CITY = {
+  Mumbai: ["Dharmveer", "Mohit", "Regan", "Shanjit", "Sunil"],
+  Pune: ["Deepak"],
+  Bhubaneswar: [],
+};
+const supportFor = (c) => SUPPORT_STAFF_BY_CITY[c || "Mumbai"] || [];
 const VISIT_TYPES = ["Meeting", "Measurement", "Installation", "Track installation", "Collection for alteration", "Cash collection", "Upholstery"];
 const HOME_OWNERSHIP = ["Rented", "Owned"];
 const BUDGET_RANGES = ["₹10K - ₹15K", "₹15K - ₹20K", "₹20K - ₹25K", "Above ₹25K"];
@@ -966,7 +971,7 @@ function EditModal({ record, onClose, onSave, onDelete }) {
           <Select label="Budget per curtain" value={form.budget_per_curtain} onChange={set("budget_per_curtain")} options={BUDGET_RANGES} allowEmpty />
           <Input label="Curtains required" type="number" inputMode="numeric" min="0" value={form.curtains_required} onChange={set("curtains_required")} />
           <Select label="Designer Name" value={form.designer_name} onChange={set("designer_name")} options={DESIGNERS} allowEmpty />
-          <Select label="Support Name" value={form.support_name} onChange={set("support_name")} options={form.support_name && !SUPPORT_STAFF.includes(form.support_name) ? [form.support_name, ...SUPPORT_STAFF] : SUPPORT_STAFF} allowEmpty />
+          <Select label="Support Name" value={form.support_name} onChange={set("support_name")} options={form.support_name && !supportFor(form.location).includes(form.support_name) ? [form.support_name, ...supportFor(form.location)] : supportFor(form.location)} allowEmpty />
           <Select label="Meeting Type" value={form.meeting_type} onChange={set("meeting_type")} options={MEETING_TYPES} />
           <Select label="Status" value={form.status} onChange={set("status")} options={STATUSES} allowEmpty />
           <Input label="Scheduled by" value={form.scheduled_by} onChange={set("scheduled_by")} />
@@ -1332,8 +1337,8 @@ function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVi
                 <td className="px-3 py-2 min-w-[140px]">
                   <select value={r.support} onChange={e => setField(r, "support_name", e.target.value)} className={selCls}>
                     <option value="">— assign —</option>
-                    {r.support && !SUPPORT_STAFF.includes(r.support) && <option value={r.support}>{r.support}</option>}
-                    {SUPPORT_STAFF.map(n => <option key={n} value={n}>{n}</option>)}
+                    {r.support && !supportFor(city).includes(r.support) && <option value={r.support}>{r.support}</option>}
+                    {supportFor(city).map(n => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </td>
                 <td className="px-3 py-2 min-w-[180px]">
@@ -1356,12 +1361,12 @@ function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVi
         </table>
       </div>
 
-      {adding && <AddVisitModal date={date} onClose={() => setAdding(false)} onSave={async (p) => { await onAddVisit(p); setAdding(false); }} />}
+      {adding && <AddVisitModal date={date} city={city} onClose={() => setAdding(false)} onSave={async (p) => { await onAddVisit(p); setAdding(false); }} />}
     </section>
   );
 }
 
-function AddVisitModal({ date, onClose, onSave }) {
+function AddVisitModal({ date, city, onClose, onSave }) {
   const [form, setForm] = useState({ visit_date: date, customer_name: "", address: "", stylist: "", support_name: "", visit_type: "Installation", timing: "", status: "" });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
@@ -1386,7 +1391,7 @@ function AddVisitModal({ date, onClose, onSave }) {
           <Input label="Customer name *" value={form.customer_name} onChange={set("customer_name")} wide />
           <Input label="Address" value={form.address} onChange={set("address")} wide />
           <Select label="Stylist" value={form.stylist} onChange={set("stylist")} options={DESIGNERS} allowEmpty />
-          <Select label="Support staff" value={form.support_name} onChange={set("support_name")} options={SUPPORT_STAFF} allowEmpty />
+          <Select label="Support staff" value={form.support_name} onChange={set("support_name")} options={supportFor(city)} allowEmpty />
           <Select label="Visit type" value={form.visit_type} onChange={set("visit_type")} options={VISIT_TYPES} wide />
         </div>
         <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 pb-safe flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
