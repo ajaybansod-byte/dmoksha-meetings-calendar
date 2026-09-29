@@ -383,7 +383,18 @@ function App() {
       )}
 
       {exportOpen && (
-        <ExportModal meetings={meetings.filter(m => (m.location || "Mumbai") === city)} onClose={() => setExportOpen(false)} />
+        <ExportModal
+          meetings={[
+            ...meetings.filter(m => (m.location || "Mumbai") === city).map(m => ({ ...m, _record: "Meeting" })),
+            ...fieldVisits.filter(v => (v.city || "Mumbai") === city).map(v => ({
+              _record: "Field visit",
+              id: v.id, meeting_date: v.visit_date, location: v.city, deleted_at: v.deleted_at,
+              timing_from: v.timing, customer_name: v.customer_name, address: v.address,
+              designer_name: v.stylist, support_name: v.support_name, visit_type: v.visit_type,
+            })),
+          ]}
+          onClose={() => setExportOpen(false)}
+        />
       )}
 
       <Footer />
@@ -1145,6 +1156,7 @@ function downloadCSV(filename, rows, columns) {
 }
 
 const EXPORT_COLUMNS = [
+  { label: "Record",        get: m => m._record || "Meeting" },
   { label: "City",          get: m => m.location || "Mumbai" },
   { label: "Customer Status", get: m => m.deleted_at ? "Inactive" : "Active" },
   { label: "Deleted On",    get: m => m.deleted_at ? new Date(m.deleted_at).toLocaleString() : "" },
@@ -1162,6 +1174,7 @@ const EXPORT_COLUMNS = [
   { label: "Designer",      get: m => m.designer_name },
   { label: "Support",       get: m => m.support_name },
   { label: "Meeting Type",  get: m => m.meeting_type },
+  { label: "Visit Type",    get: m => m.visit_type || (m._record === "Field visit" ? "" : "Meeting") },
   { label: "Meeting Status", get: m => m.status },
   { label: "Scheduled By",  get: m => m.scheduled_by },
   { label: "Recording",     get: m => m.recording },
@@ -1188,7 +1201,7 @@ function ExportModal({ meetings, onClose }) {
 
   const handleExport = () => {
     if (inRange.length === 0) { alert("No meetings in the selected range."); return; }
-    const sorted = [...inRange].sort((a, b) => (a.meeting_date < b.meeting_date ? -1 : 1));
+    const sorted = [...inRange].sort((a, b) => a.meeting_date !== b.meeting_date ? (a.meeting_date < b.meeting_date ? -1 : 1) : ((timeToMinutes(a.timing_from || a.timing) ?? 9999) - (timeToMinutes(b.timing_from || b.timing) ?? 9999)));
     downloadCSV(`dmoksha_meetings_${from}_to_${to}.csv`, sorted, EXPORT_COLUMNS);
     onClose();
   };
@@ -1239,7 +1252,7 @@ function ExportModal({ meetings, onClose }) {
             </label>
           </div>
           <div className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-3">
-            <span className="font-semibold text-gray-900">{inRange.length}</span> meeting{inRange.length === 1 ? "" : "s"} will be exported
+            <span className="font-semibold text-gray-900">{inRange.length}</span> row{inRange.length === 1 ? "" : "s"} will be exported ({inRange.filter(m => m._record !== "Field visit").length} meetings, {inRange.filter(m => m._record === "Field visit").length} installations / field visits)
             {inRange.length > 0 && (
               <span className="text-gray-500"> ({from} → {to})</span>
             )}
