@@ -155,6 +155,7 @@ function CalendarApp({ user }) {
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [exportOpen, setExportOpen] = useState(false);
   const [fieldVisits, setFieldVisits] = useState([]);
+  const [workloadFocus, setWorkloadFocus] = useState(null);
   const [city, setCity] = useState(() => { try { const v = localStorage.getItem("dmoksha.city"); return CITIES.includes(v) ? v : "Mumbai"; } catch { return "Mumbai"; } });
   useEffect(() => { try { localStorage.setItem("dmoksha.city", city); } catch {} }, [city]);
 
@@ -325,7 +326,7 @@ function CalendarApp({ user }) {
       {!loading && !error && (
         <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
           <CityToggle city={city} setCity={setCity} counts={cityCounts} />
-          {view !== "trash" && view !== "schedule" && (
+          {view !== "trash" && view !== "schedule" && view !== "workload" && (
             <FilterBar
               meetings={meetings}
               filters={filters}
@@ -356,11 +357,14 @@ function CalendarApp({ user }) {
               onAddVisit={addFieldVisit}
               onDeleteVisit={deleteFieldVisit}
               onEditMeeting={(m) => setEditing(m)}
+              onOpenWorkload={(name) => { setWorkloadFocus(typeof name === "string" ? name : null); setView("workload"); }}
             />
+          ) : view === "workload" ? (
+            <WorkloadView meetings={meetings} fieldVisits={fieldVisits} city={city} focus={workloadFocus} />
           ) : (
             <TrashView meetings={deletedMeetings} onRestore={handleRestore} onHardDelete={handleHardDelete} />
           )}
-          {view !== "trash" && view !== "schedule" && <Legend />}
+          {view !== "trash" && view !== "schedule" && view !== "workload" && <Legend />}
         </main>
       )}
 
@@ -425,6 +429,7 @@ function Header({ view, setView, onAddNew, onExport, deletedCount, user }) {
             <button onClick={() => setView("calendar")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition ${view === "calendar" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>Calendar</button>
             <button onClick={() => setView("list")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition ${view === "list" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>List</button>
             <button onClick={() => setView("schedule")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition ${view === "schedule" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>Scheduling</button>
+            <button onClick={() => setView("workload")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition ${view === "workload" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>Workload</button>
             <button onClick={() => setView("trash")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition inline-flex items-center gap-1 ${view === "trash" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>
               Trash
               {deletedCount > 0 && (
@@ -1307,7 +1312,174 @@ function ExportModal({ meetings, onClose }) {
 // =========================================================
 const fmtSheetDate = (iso) => { const [y, m, d] = (iso || "").split("-"); return y ? `${m}/${d}/${y}` : ""; };
 
-function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVisit, onAddVisit, onDeleteVisit, onEditMeeting }) {
+// =========================================================
+//                 Workload (support-staff balance)
+// =========================================================
+const isInstall = (t) => /install/i.test(t || "");
+const isMeetingType = (t) => !t || /^meeting$/i.test(t);
+// Unified job list for a city: calendar meetings (not trashed) + field visits
+function cityJobs(meetings, fieldVisits, city) {
+  const out = [];
+  meetings.forEach(m => {
+    if (m.deleted_at || (m.location || "Mumbai") !== city) return;
+    out.push({ date: m.meeting_date, support: (m.support_name || "").trim(), stylist: (m.designer_name || "").trim(), visit: m.visit_type || "Meeting" });
+  });
+  fieldVisits.forEach(v => {
+    if (v.deleted_at || (v.city || "Mumbai") !== city) return;
+    out.push({ date: v.visit_date, support: (v.support_name || "").trim(), stylist: (v.stylist || "").trim(), visit: v.visit_type || "" });
+  });
+  return out;
+}
+function weekRange(iso) { const d = new Date(iso + "T00:00:00"); const dow = (d.getDay() + 6) % 7; const a = new Date(d); a.setDate(d.getDate() - dow); const b = new Date(a); b.setDate(a.getDate() + 6); return [toISO(a), toISO(b)]; }
+function monthRange(iso) { const d = new Date(iso + "T00:00:00"); return [toISO(new Date(d.getFullYear(), d.getMonth(), 1)), toISO(new Date(d.getFullYear(), d.getMonth() + 1, 0))]; }
+function tally(jobs, key, names, from, to) {
+  const t = {}; names.forEach(n => t[n] = { m: 0, i: 0, o: 0 });
+  jobs.forEach(j => {
+    if (j.date < from || j.date > to) return;
+    const n = j[key]; if (!n) return;
+    if (!t[n]) t[n] = { m: 0, i: 0, o: 0 };
+    if (isInstall(j.visit)) t[n].i++; else if (isMeetingType(j.visit)) t[n].m++; else t[n].o++;
+  });
+  Object.values(t).forEach(x => x.total = x.m + x.i + x.o);
+  return t;
+}
+
+function WorkloadStrip({ meetings, fieldVisits, city, date, onOpenWorkload }) {
+  const names = supportFor(city);
+  if (names.length === 0) return null;
+  const jobs = cityJobs(meetings, fieldVisits, city);
+  const [w0, w1] = weekRange(date), [m0, m1] = monthRange(date);
+  const day = tally(jobs, "support", names, date, date);
+  const wk = tally(jobs, "support", names, w0, w1);
+  const mo = tally(jobs, "support", names, m0, m1);
+  const weekTotals = names.map(n => wk[n].total);
+  const lo = Math.min(...weekTotals), hi = Math.max(...weekTotals);
+  return (
+    <div className="mb-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Support staff workload · {city}</div>
+        <button onClick={onOpenWorkload} className="text-xs text-blue-600 hover:underline">Full workload report →</button>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+        {names.map(n => {
+          const t = wk[n].total;
+          const tone = names.length > 1 && lo !== hi
+            ? (t === lo ? "border-green-300 bg-green-50" : t === hi ? "border-amber-300 bg-amber-50" : "border-gray-200 bg-white")
+            : "border-gray-200 bg-white";
+          const tag = names.length > 1 && lo !== hi ? (t === lo ? "Lightest" : t === hi ? "Heaviest" : null) : null;
+          return (
+            <button key={n} onClick={() => onOpenWorkload(n)} className={`text-left rounded-xl border p-3 hover:shadow-soft transition ${tone}`}>
+              <div className="flex items-center justify-between">
+                <div className="font-semibold text-gray-900 truncate">{n}</div>
+                {tag && <span className={`text-[10px] font-semibold rounded px-1.5 py-0.5 ${t === lo ? "bg-green-600 text-white" : "bg-amber-500 text-white"}`}>{tag}</span>}
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-1 text-center">
+                {[["Today", day[n]], ["Week", wk[n]], ["Month", mo[n]]].map(([l, v]) => (
+                  <div key={l}>
+                    <div className="text-[10px] uppercase tracking-wider text-gray-500">{l}</div>
+                    <div className="text-lg font-bold text-gray-900 leading-tight">{v.total}</div>
+                    <div className="text-[10px] text-gray-500">M {v.m} · I {v.i}{v.o ? ` · O ${v.o}` : ""}</div>
+                  </div>
+                ))}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      <div className="text-[11px] text-gray-500 mt-1.5">M = meetings · I = installations · O = other visits (measurement, collection, upholstery). Week = Mon–Sun containing the selected date.</div>
+    </div>
+  );
+}
+
+function WorkloadView({ meetings, fieldVisits, city, focus }) {
+  const today = toISO(new Date());
+  const [preset, setPreset] = useState("week");
+  const [from, setFrom] = useState(weekRange(today)[0]);
+  const [to, setTo] = useState(weekRange(today)[1]);
+  const [who, setWho] = useState("support");
+  const applyPreset = (p) => {
+    setPreset(p);
+    if (p === "week") { const [a, b] = weekRange(today); setFrom(a); setTo(b); }
+    if (p === "month") { const [a, b] = monthRange(today); setFrom(a); setTo(b); }
+    if (p === "year") { setFrom(today.slice(0, 4) + "-01-01"); setTo(today.slice(0, 4) + "-12-31"); }
+  };
+  const jobs = cityJobs(meetings, fieldVisits, city);
+  const baseNames = who === "support" ? supportFor(city) : DESIGNERS;
+  const t = tally(jobs, who, baseNames, from, to);
+  const rows = Object.keys(t).map(n => ({ name: n, ...t[n] })).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+  const grand = rows.reduce((s, r) => s + r.total, 0);
+  const avg = rows.length ? grand / rows.length : 0;
+  const exportCsv = () => {
+    const cols = [
+      { label: who === "support" ? "Support staff" : "Stylist", get: r => r.name },
+      { label: "Meetings", get: r => r.m }, { label: "Installations", get: r => r.i }, { label: "Other visits", get: r => r.o },
+      { label: "Total", get: r => r.total }, { label: "Share %", get: r => grand ? Math.round(r.total * 100 / grand) : 0 },
+    ];
+    downloadCSV(`workload_${who}_${city}_${from}_to_${to}.csv`, rows, cols);
+  };
+  const Pill = ({ id, children, cur, set }) => (
+    <button type="button" onClick={() => set(id)} className={`px-3 py-2 rounded-lg border text-sm font-medium transition ${cur === id ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"}`}>{children}</button>
+  );
+  return (
+    <section>
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-4">
+        <div>
+          <h2 className="text-lg sm:text-xl font-semibold text-gray-900">Workload · {city}</h2>
+          <p className="text-sm text-gray-500">How meetings and installations are spread across the team.</p>
+        </div>
+        <button onClick={exportCsv} disabled={rows.length === 0} className="px-3 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50">Download CSV</button>
+      </div>
+      <div className="bg-white border border-gray-200 rounded-xl shadow-soft p-3 mb-4 flex flex-wrap items-center gap-2">
+        <div className="inline-flex rounded-full overflow-hidden border border-gray-300 bg-gray-50 mr-2">
+          {[["support", "Support staff"], ["stylist", "Stylists"]].map(([k, l]) => (
+            <button key={k} onClick={() => setWho(k)} className={`px-3 py-2 text-sm font-medium ${who === k ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>{l}</button>
+          ))}
+        </div>
+        <Pill id="week" cur={preset} set={applyPreset}>This week</Pill>
+        <Pill id="month" cur={preset} set={applyPreset}>This month</Pill>
+        <Pill id="year" cur={preset} set={applyPreset}>This year</Pill>
+        <Pill id="custom" cur={preset} set={applyPreset}>Custom</Pill>
+        <input type="date" value={from} onChange={e => { setPreset("custom"); setFrom(e.target.value); }} className="bg-white border border-gray-300 rounded-md px-2 py-1.5 text-sm" />
+        <span className="text-gray-400">→</span>
+        <input type="date" value={to} onChange={e => { setPreset("custom"); setTo(e.target.value); }} className="bg-white border border-gray-300 rounded-md px-2 py-1.5 text-sm" />
+        <span className="text-sm text-gray-500 ml-auto">{grand} job{grand === 1 ? "" : "s"} · avg {avg.toFixed(1)} per person</span>
+      </div>
+      <div className="overflow-x-auto scrollbar-thin rounded-xl border border-gray-200 bg-white shadow-card">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 bg-gray-50">
+              {[who === "support" ? "Support staff" : "Stylist", "Meetings", "Installations", "Other visits", "Total", "Share", "vs average"].map((h, i) => (
+                <th key={i} className={`px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-gray-600 whitespace-nowrap ${i === 0 ? "text-left" : "text-right"}`}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {rows.map(r => {
+              const diff = r.total - avg;
+              const share = grand ? Math.round(r.total * 100 / grand) : 0;
+              return (
+                <tr key={r.name} className={`hover:bg-gray-50 ${focus === r.name ? "bg-blue-50" : ""}`}>
+                  <td className="px-3 py-2 font-medium text-gray-900">{r.name}</td>
+                  <td className="px-3 py-2 text-right text-gray-700">{r.m}</td>
+                  <td className="px-3 py-2 text-right text-gray-700">{r.i}</td>
+                  <td className="px-3 py-2 text-right text-gray-700">{r.o}</td>
+                  <td className="px-3 py-2 text-right font-semibold text-gray-900">{r.total}</td>
+                  <td className="px-3 py-2 text-right text-gray-700">
+                    <div className="inline-flex items-center gap-2"><span className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden"><span className="block h-full bg-blue-500" style={{ width: share + "%" }} /></span>{share}%</div>
+                  </td>
+                  <td className={`px-3 py-2 text-right font-medium ${diff > 0.5 ? "text-amber-700" : diff < -0.5 ? "text-green-700" : "text-gray-500"}`}>{diff > 0 ? "+" : ""}{diff.toFixed(1)}</td>
+                </tr>
+              );
+            })}
+            {rows.length === 0 && <tr><td colSpan="7" className="text-center py-12 text-gray-500">No jobs in this range for {city}.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVisit, onAddVisit, onDeleteVisit, onEditMeeting, onOpenWorkload }) {
   const [date, setDate] = useState(toISO(new Date()));
   const [adding, setAdding] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -1356,6 +1528,8 @@ function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVi
           <button onClick={downloadSheet} disabled={rows.length === 0} className="px-3 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50">Download CSV</button>
         </div>
       </div>
+
+      <WorkloadStrip meetings={meetings} fieldVisits={fieldVisits} city={city} date={date} onOpenWorkload={onOpenWorkload} />
 
       <div className="overflow-x-auto scrollbar-thin rounded-xl border border-gray-200 bg-white shadow-card">
         <table className="w-full text-sm">
