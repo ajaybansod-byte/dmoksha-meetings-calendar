@@ -1520,7 +1520,13 @@ function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVi
           <input type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} className="bg-white border border-gray-300 rounded-md px-3 py-2 text-sm" />
           <button onClick={() => shift(1)} className="w-9 h-9 inline-flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-700 border border-gray-300 bg-white">›</button>
           <button onClick={() => setDate(toISO(new Date()))} className="px-3 py-2 rounded-md bg-white hover:bg-gray-50 text-sm border border-gray-300 text-gray-700 font-medium">Today</button>
-          <div className="text-sm text-gray-600 ml-1 hidden sm:block">{fullDayName(d)} · {rows.length} visit{rows.length === 1 ? "" : "s"}{missing > 0 && <span className="text-amber-600"> · {missing} unassigned</span>}</div>
+          <div className="text-sm text-gray-600 ml-1">{fullDayName(d)} · {(() => {
+            const nM = rows.filter(r => !r.visit || r.visit === "Meeting").length;
+            const nI = rows.filter(r => r.visit === "Installation" || r.visit === "Track installation").length;
+            const nO = rows.length - nM - nI;
+            const pl = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+            return <><b className="font-semibold text-gray-800">{pl(nM, "meeting")}</b> · <b className="font-semibold text-gray-800">{pl(nI, "installation")}</b>{nO > 0 && <> · {pl(nO, "other visit")}</>}</>;
+          })()}{missing > 0 && <span className="text-amber-600"> · {missing} unassigned</span>}</div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button onClick={() => setAdding(true)} className="px-3 py-2 rounded-md bg-white hover:bg-gray-50 text-sm border border-gray-300 text-gray-700 font-medium">+ Add visit</button>
