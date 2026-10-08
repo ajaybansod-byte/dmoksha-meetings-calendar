@@ -95,12 +95,37 @@ function Login() {
   );
 }
 
+// ---------- Job classification ----------
+const INSTALL_TYPES = ["Installation", "Track installation"];
+const MAINT_TYPES = ["Measurement", "Collection for alteration", "Cash collection", "Upholstery", "Ironing"];
+const sectionOf = vt => INSTALL_TYPES.includes(vt) ? "install" : MAINT_TYPES.includes(vt) ? "maint" : "meetings";
+const STATUS_UI = { completed: ["Completed","bg-green-100 text-green-800"], unfinished: ["Unfinished","bg-amber-100 text-amber-800"], in_progress: ["In progress","bg-blue-100 text-blue-800"] };
+const jobPhotoUrl = path => publicUrl(path);
+
+// Build the per-layer checklist from an order: "Living room window 1 — Main / Sheer / Blind"
+function checklistFromOrder(order) {
+  const items = [];
+  (order?.windows || []).forEach((w, i) => {
+    const label = `${(w.roomLabel || "Room").trim()} window ${(w.windowIndex ?? i) + 1}`;
+    const kind = w.kind || "curtain";
+    if (kind === "curtain" || kind === "both") {
+      const ct = w.curtain_type || "Main";
+      if (ct === "Main" || ct === "Both") items.push({ key: `w${i}-main`, label, layer: "Main" });
+      if (ct === "Sheer" || ct === "Both") items.push({ key: `w${i}-sheer`, label, layer: "Sheer" });
+    }
+    if (kind === "blind" || kind === "both") items.push({ key: `w${i}-blind`, label, layer: "Blind" + (w.blind?.blind_type ? ` (${w.blind.blind_type})` : "") });
+  });
+  return items;
+}
+
 function Home({ staff }) {
-  const [tab, setTab] = useState("today");
+  const [tab, setTab] = useState("meetings");
+  const [date, setDate] = useState(toISO(new Date()));
   const [menu, setMenu] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const refresh = () => setRefreshKey(k => k + 1);
+  const today = toISO(new Date()), tomorrow = addDays(today, 1);
   return (
     <div className="min-h-screen pb-24">
       <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
@@ -112,16 +137,25 @@ function Home({ staff }) {
           <button onClick={() => { setMenu(false); setPwOpen(true); }} className="block w-full text-left px-4 py-3 hover:bg-gray-50">Change password</button>
           <button onClick={() => supabase.auth.signOut()} className="block w-full text-left px-4 py-3 hover:bg-gray-50 text-red-600">Sign out</button>
         </div>}
+        {tab !== "expenses" && (
+          <div className="px-4 pb-3 flex items-center gap-2">
+            {[[today,"Today"],[tomorrow,"Tomorrow"]].map(([d,l]) => (
+              <button key={d} onClick={() => setDate(d)} className={`px-3 py-1.5 rounded-full text-sm font-medium border ${date === d ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300"}`}>{l}</button>
+            ))}
+            <input type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} className={`ml-auto border rounded-full px-3 py-1.5 text-sm ${date !== today && date !== tomorrow ? "border-blue-600 text-blue-700 font-medium" : "border-gray-300 text-gray-600"}`} />
+          </div>
+        )}
       </header>
       <main className="px-4 py-4">
-        {tab === "today" && <DayList staff={staff} date={toISO(new Date())} refreshKey={refreshKey} onChanged={refresh} />}
-        {tab === "tomorrow" && <DayList staff={staff} date={addDays(toISO(new Date()), 1)} refreshKey={refreshKey} onChanged={refresh} />}
+        {tab === "meetings" && <DayList staff={staff} date={date} section="meetings" refreshKey={refreshKey} onChanged={refresh} />}
+        {tab === "install" && <DayList staff={staff} date={date} section="install" refreshKey={refreshKey} onChanged={refresh} />}
+        {tab === "maint" && <DayList staff={staff} date={date} section="maint" refreshKey={refreshKey} onChanged={refresh} />}
         {tab === "expenses" && <MyExpenses staff={staff} refreshKey={refreshKey} />}
       </main>
       <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 pb-safe z-30">
-        <div className="grid grid-cols-3">
-          {[["today","Today"],["tomorrow","Tomorrow"],["expenses","My expenses"]].map(([k,l]) => (
-            <button key={k} onClick={() => setTab(k)} className={`py-3 text-sm font-medium ${tab === k ? "text-blue-600 border-t-2 border-blue-600 -mt-px" : "text-gray-500"}`}>{l}</button>
+        <div className="grid grid-cols-4">
+          {[["meetings","Meetings","📅"],["install","Installation","🪛"],["maint","Maintenance","🧰"],["expenses","Expenses","₹"]].map(([k,l,ic]) => (
+            <button key={k} onClick={() => setTab(k)} className={`py-2 text-[11px] font-medium flex flex-col items-center gap-0.5 ${tab === k ? "text-blue-600 border-t-2 border-blue-600 -mt-px" : "text-gray-500"}`}><span className="text-lg leading-none">{ic}</span>{l}</button>
           ))}
         </div>
       </nav>
@@ -130,59 +164,268 @@ function Home({ staff }) {
   );
 }
 
-function DayList({ staff, date, refreshKey, onChanged }) {
+function DayList({ staff, date, section, refreshKey, onChanged }) {
   const [rows, setRows] = useState(null);
   const [expenses, setExpenses] = useState([]);
-  const [open, setOpen] = useState(null);
+  const [jobs, setJobs] = useState({});
+  const [open, setOpen] = useState(null);     // expense form
+  const [sheet, setSheet] = useState(null);   // job sheet
   useEffect(() => {
-    let alive = true;
+    let alive = true; setRows(null);
     (async () => {
-      const [m, v, e] = await Promise.all([
-        supabase.from("designer_meetings").select("*").eq("meeting_date", date).is("deleted_at", null).or(`designer_name.eq.${staff.name},support_name.eq.${staff.name}`),
-        supabase.from("field_visits").select("*").eq("visit_date", date).is("deleted_at", null).or(`stylist.eq.${staff.name},support_name.eq.${staff.name}`),
+      const wantMeetings = section === "meetings";
+      // Field jobs (installation / maintenance) are shown only to the assigned support person; meetings to designer or support.
+      const visitFilter = wantMeetings ? `stylist.eq.${staff.name},support_name.eq.${staff.name}` : `support_name.eq.${staff.name}`;
+      const [m, v, e, j] = await Promise.all([
+        wantMeetings ? supabase.from("designer_meetings").select("*").eq("meeting_date", date).is("deleted_at", null).or(`designer_name.eq.${staff.name},support_name.eq.${staff.name}`) : Promise.resolve({ data: [] }),
+        supabase.from("field_visits").select("*").eq("visit_date", date).is("deleted_at", null).or(visitFilter),
         supabase.from("travel_expenses").select("id,meeting_id,visit_id").eq("staff_id", staff.id).eq("expense_date", date),
+        supabase.from("job_completions").select("*").eq("staff_id", staff.id).eq("job_date", date),
       ]);
       if (!alive) return;
       const mm = (m.data || []).map(x => ({ kind:"meeting", id:x.id, time:x.timing_from || x.timing || "", customer:x.customer_name, mobile:x.mobile_number, address:[x.address, x.area].filter(Boolean).join(", "), visit:x.visit_type || "Meeting", partner: staff.role === "designer" ? x.support_name : x.designer_name, type:x.meeting_type, clientId:x.client_id }));
-      const vv = (v.data || []).map(x => ({ kind:"visit", id:x.id, time:x.timing || "", customer:x.customer_name, mobile:null, address:x.address || "", visit:x.visit_type || "", partner: staff.role === "designer" ? x.support_name : x.stylist, type:null }));
+      const vv = (v.data || []).filter(x => sectionOf(x.visit_type || "Meeting") === section)
+        .map(x => ({ kind:"visit", id:x.id, time:x.timing || "", customer:x.customer_name, mobile:x.mobile, address:x.address || "", visit:x.visit_type || "", partner: staff.role === "designer" ? x.support_name : x.stylist, type:null, clientId:x.client_id, orderId:x.order_id, raw:x }));
       setRows([...mm, ...vv].sort((a,b) => (timeToMinutes(a.time) ?? 9999) - (timeToMinutes(b.time) ?? 9999)));
       setExpenses(e.data || []);
+      const jm = {}; (j.data || []).forEach(x => { jm[x.job_id] = x; }); setJobs(jm);
     })();
     return () => { alive = false; };
-  }, [date, staff.id, refreshKey]);
+  }, [date, staff.id, section, refreshKey]);
 
   const hasExpense = r => expenses.some(e => r.kind === "meeting" ? e.meeting_id === r.id : e.visit_id === r.id);
   if (rows === null) return <Center><Spinner /></Center>;
+  const noun = section === "meetings" ? "meeting" : "job";
   return (
     <div>
-      <div className="flex items-baseline justify-between mb-3"><h2 className="text-lg font-semibold">{niceDate(date)}</h2><span className="text-sm text-gray-500">{rows.length} assignment{rows.length === 1 ? "" : "s"}</span></div>
-      {rows.length === 0 && <div className="text-center text-gray-500 py-16">Nothing assigned to you on this day.</div>}
+      <div className="flex items-baseline justify-between mb-3"><h2 className="text-lg font-semibold">{niceDate(date)}</h2><span className="text-sm text-gray-500">{rows.length} {noun}{rows.length === 1 ? "" : "s"}</span></div>
+      {rows.length === 0 && <div className="text-center text-gray-500 py-16">No {noun}s assigned to you on this day.</div>}
       <div className="space-y-3">
-        {rows.map(r => (
-          <div key={r.kind + r.id} className="bg-white border border-gray-200 rounded-xl shadow-sm p-4">
+        {rows.map(r => {
+          const jc = r.kind === "visit" ? jobs[r.id] : null;
+          const st = jc && STATUS_UI[jc.status];
+          const done = jc && (jc.status === "completed" || jc.status === "unfinished");
+          const prog = jc && jc.checklist ? Object.values(jc.checklist).filter(Boolean).length : 0;
+          return (
+          <div key={r.kind + r.id} className={`bg-white border rounded-xl shadow-sm p-4 ${jc?.status === "completed" ? "border-green-300" : jc?.status === "unfinished" ? "border-amber-300" : "border-gray-200"}`}>
             <div className="flex items-start justify-between gap-2">
               <div><div className="text-xs font-semibold text-blue-600">{r.time || "Time TBD"} · {r.visit}</div><div className="text-base font-semibold text-gray-900 mt-0.5">{r.customer || "—"}</div>{r.clientId && <div className="font-mono text-[11px] font-semibold text-blue-700">{r.clientId}</div>}</div>
-              {r.type && <span className="text-[10px] bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 whitespace-nowrap">{r.type}</span>}
+              <div className="flex flex-col items-end gap-1">
+                {r.type && <span className="text-[10px] bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 whitespace-nowrap">{r.type}</span>}
+                {st && <span className={`text-[10px] font-semibold rounded px-1.5 py-0.5 whitespace-nowrap ${st[1]}`}>{st[0]}</span>}
+              </div>
             </div>
             {r.address && <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.address)}`} target="_blank" rel="noopener" className="block text-sm text-gray-700 mt-2 underline decoration-gray-300">📍 {r.address}</a>}
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600 mt-2">
               {r.partner && <span>👤 With {r.partner}</span>}
               {r.mobile && <a href={`tel:${r.mobile}`} className="text-blue-600">📞 {r.mobile}</a>}
             </div>
-            <div className="mt-3">
+            <div className="mt-3 grid gap-2">
+              {r.kind === "visit" && section !== "meetings" && (
+                <button onClick={() => setSheet(r)} className={`w-full py-2.5 rounded-lg text-sm font-semibold ${done ? "bg-gray-100 text-gray-800" : "bg-gray-900 text-white"}`}>
+                  {done ? "View job sheet" : jc ? `Continue job sheet${prog ? ` · ${prog} ticked` : ""}` : "Open job sheet"}
+                </button>
+              )}
               {hasExpense(r)
                 ? <div className="text-sm text-green-700 font-medium">✓ Travel expense submitted</div>
-                : <button onClick={() => setOpen(r)} className="w-full py-2.5 rounded-lg bg-blue-600 text-white text-sm font-semibold">Add travel expense</button>}
+                : <button onClick={() => setOpen(r)} className={`w-full py-2.5 rounded-lg text-sm font-semibold ${section === "meetings" ? "bg-blue-600 text-white" : "bg-blue-50 text-blue-700 border border-blue-200"}`}>Add travel expense</button>}
             </div>
-          </div>
-        ))}
+          </div>);
+        })}
       </div>
       {open && <ExpenseForm staff={staff} date={date} row={open} onClose={() => setOpen(null)} onSaved={() => { setOpen(null); onChanged(); }} />}
+      {sheet && <JobSheet staff={staff} date={date} row={sheet} existing={jobs[sheet.id] || null} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); onChanged(); }} />}
     </div>
   );
 }
 
-function FileField({ label, files, setFiles }) {
+// ---------- Job sheet (installation + maintenance) ----------
+const Field = ({ label, children }) => <label className="block"><span className="text-xs uppercase tracking-wider text-gray-500 font-semibold">{label}</span>{children}</label>;
+function JobSheet({ staff, date, row, existing, onClose, onSaved }) {
+  const vt = row.visit || "";
+  const isInstall = vt === "Installation";
+  const readOnly = existing && (existing.status === "completed" || existing.status === "unfinished");
+  const [order, setOrder] = useState(isInstall && row.orderId ? undefined : null);
+  const [checks, setChecks] = useState(existing?.checklist || {});
+  const [details, setDetails] = useState(existing?.details || {});
+  const [note, setNote] = useState(existing?.note || "");
+  const [files, setFiles] = useState([]);
+  const [mode, setMode] = useState(null); // null | "unfinished"
+  const [reason, setReason] = useState(existing?.unfinished_reason || "");
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
+  const [savedTick, setSavedTick] = useState(false);
+
+  useEffect(() => {
+    if (!(isInstall && row.orderId)) return;
+    supabase.from("customer_orders").select("id,customer_name,customer_mobile,client_id,customer_building_name,customer_landmark,customer_city,designer_name,windows_count,windows,rooms,advance_amount,balance_amount,balance_paid,special_note,status")
+      .eq("id", row.orderId).single().then(({ data }) => setOrder(data || null));
+  }, [row.orderId]);
+
+  const items = useMemo(() => checklistFromOrder(order), [order]);
+  const ticked = items.filter(i => checks[i.key]).length;
+  const setD = k => e => setDetails(d => ({ ...d, [k]: e.target.value }));
+
+  const persist = async (patch) => {
+    const base = { staff_id: staff.id, staff_name: staff.name, job_kind: "visit", job_id: row.id, job_type: vt, job_date: date,
+      order_id: row.orderId || null, client_id: row.clientId || null, customer_name: row.customer || null,
+      checklist: checks, details, note: note || null, updated_at: new Date().toISOString(), ...patch };
+    if (!existing && !patch.started_at) base.started_at = new Date().toISOString();
+    const { error } = await supabase.from("job_completions").upsert(base, { onConflict: "job_kind,job_id" });
+    if (error) throw new Error(error.message);
+  };
+  // Auto-save ticks (debounced) so progress isn't lost if the phone locks
+  useEffect(() => {
+    if (readOnly || (!existing && Object.keys(checks).length === 0)) return;
+    const t = setTimeout(() => persist({ status: "in_progress" }).then(() => { setSavedTick(true); setTimeout(() => setSavedTick(false), 1200); }).catch(() => {}), 600);
+    return () => clearTimeout(t);
+  }, [checks]);
+
+  const uploadAll = async () => {
+    const paths = [];
+    for (const f of files) {
+      const ext = (f.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `${staff.auth_user_id}/jobs/${row.id}/${crypto.randomUUID()}.${ext}`;
+      const { error } = await supabase.storage.from("invoices").upload(path, f, { contentType: f.type || "image/jpeg" });
+      if (error) throw new Error("Photo upload failed: " + error.message);
+      paths.push(path);
+    }
+    return [...(existing?.photos || []), ...paths];
+  };
+  const validate = () => {
+    if (isInstall && items.length && ticked < items.length) return `Tick all ${items.length} items before marking complete (or choose "Could not finish").`;
+    if (vt === "Measurement" && files.length === 0 && !(existing?.photos || []).length) return "Attach at least one measurement photo.";
+    if (vt === "Cash collection") { if (!(Number(details.amount) > 0)) return "Enter the amount collected."; if (!details.mode) return "Select how the customer paid."; }
+    if (vt === "Collection for alteration" && !(Number(details.pieces) > 0)) return "Enter how many pieces you collected.";
+    if ((vt === "Upholstery" || vt === "Ironing") && !(Number(details.pieces) > 0)) return "Enter how many pieces were done.";
+    if (files.length === 0 && !(existing?.photos || []).length && vt !== "Cash collection") return "Attach at least one photo of the finished work.";
+    return null;
+  };
+  const finish = async (status) => {
+    setErr(null);
+    if (status === "completed") { const v = validate(); if (v) { setErr(v); return; } }
+    if (status === "unfinished" && !reason.trim()) { setErr("Tell the office why the job couldn't be finished."); return; }
+    setBusy(true);
+    try {
+      const photos = await uploadAll();
+      await persist({ status, photos, completed_at: new Date().toISOString(), unfinished_reason: status === "unfinished" ? reason.trim() : null });
+      await supabase.from("field_visits").update({ status: status === "completed" ? "Completed" : "Unfinished" }).eq("id", row.id);
+      onSaved();
+    } catch (ex) { setErr(ex.message); setBusy(false); }
+  };
+
+  const inp = "mt-1 w-full border border-gray-300 rounded-lg px-3 py-3 text-base disabled:bg-gray-50";
+  const addr = order ? [order.customer_building_name, order.customer_landmark, order.customer_city].filter(Boolean).join(", ") : row.address;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-end" onClick={onClose}>
+      <div className="bg-white w-full max-h-[94vh] overflow-y-auto rounded-t-2xl" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between z-10">
+          <div><div className="font-semibold">{vt} · job sheet</div><div className="text-xs text-gray-500">{row.customer} · {niceDate(date)}{savedTick && <span className="ml-2 text-green-600">saved ✓</span>}</div></div>
+          <button type="button" onClick={onClose} className="w-9 h-9 rounded-full hover:bg-gray-100 text-2xl leading-none text-gray-500">×</button>
+        </div>
+        {err && <div className="mx-4 mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">{err}</div>}
+        {readOnly && <div className={`mx-4 mt-3 p-3 rounded-lg text-sm ${existing.status === "completed" ? "bg-green-50 border border-green-200 text-green-800" : "bg-amber-50 border border-amber-200 text-amber-800"}`}>
+          {existing.status === "completed" ? "Marked complete" : "Marked unfinished"} on {new Date(existing.completed_at).toLocaleString("en-IN")}{existing.unfinished_reason ? ` — ${existing.unfinished_reason}` : ""}</div>}
+        <div className="p-4 space-y-5">
+          {/* Customer */}
+          <section className="rounded-xl border border-gray-200 p-3">
+            <div className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-1">Customer</div>
+            <div className="font-semibold text-gray-900">{row.customer}{row.clientId && <span className="ml-2 font-mono text-xs text-blue-700">{row.clientId}</span>}</div>
+            {addr && <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`} target="_blank" rel="noopener" className="block text-sm text-gray-700 mt-1 underline decoration-gray-300">📍 {addr}</a>}
+            {(row.mobile || order?.customer_mobile) && <a href={`tel:${row.mobile || order.customer_mobile}`} className="block text-sm text-blue-600 mt-1">📞 {row.mobile || order.customer_mobile}</a>}
+            {row.partner && <div className="text-sm text-gray-600 mt-1">👤 Stylist: {row.partner}</div>}
+          </section>
+
+          {/* Installation: order summary + checklist */}
+          {isInstall && (order === undefined ? <Center><Spinner /></Center> : !order ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">No order is linked to this visit, so the curtain checklist isn't available. Please ask the office to link the order. You can still mark the job complete with photos.</div>
+          ) : (
+            <>
+              <section className="rounded-xl border border-gray-200 p-3">
+                <div className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-1">Order summary</div>
+                <div className="grid grid-cols-2 gap-y-1 text-sm">
+                  <div className="text-gray-500">Order</div><div className="font-medium">#{order.id}</div>
+                  <div className="text-gray-500">Windows</div><div className="font-medium">{order.windows_count ?? (order.windows || []).length}</div>
+                  <div className="text-gray-500">Curtain items</div><div className="font-medium">{items.length}</div>
+                  <div className="text-gray-500">Balance due</div>
+                  <div className={`font-bold ${order.balance_paid || !(Number(order.balance_amount) > 0) ? "text-green-700" : "text-red-700"}`}>{order.balance_paid || !(Number(order.balance_amount) > 0) ? "Paid ✓" : inr(order.balance_amount) + " to collect"}</div>
+                </div>
+                {order.special_note && <div className="mt-2 text-sm bg-yellow-50 border border-yellow-200 rounded-lg p-2 text-yellow-900">📝 {order.special_note}</div>}
+              </section>
+              <section className="rounded-xl border border-gray-200 p-3">
+                <div className="flex items-baseline justify-between mb-2"><div className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Installation checklist</div><div className="text-xs font-semibold text-gray-700">{ticked}/{items.length}</div></div>
+                <div className="h-1.5 bg-gray-100 rounded-full mb-3"><div className="h-1.5 bg-green-500 rounded-full transition-all" style={{ width: `${items.length ? ticked/items.length*100 : 0}%` }} /></div>
+                <div className="divide-y divide-gray-100">
+                  {items.map(it => (
+                    <label key={it.key} className={`flex items-center gap-3 py-3 ${readOnly ? "" : "active:bg-gray-50"}`}>
+                      <input type="checkbox" disabled={readOnly} checked={!!checks[it.key]} onChange={e => setChecks(c => ({ ...c, [it.key]: e.target.checked }))} className="w-6 h-6 accent-green-600 shrink-0" />
+                      <span className={`text-base ${checks[it.key] ? "line-through text-gray-400" : "text-gray-900"}`}>{it.label} <b>{it.layer}</b></span>
+                    </label>
+                  ))}
+                  {items.length === 0 && <div className="text-sm text-gray-500 py-2">This order has no curtain or blind items.</div>}
+                </div>
+              </section>
+            </>
+          ))}
+
+          {/* Maintenance-type specific fields */}
+          {vt === "Cash collection" && (
+            <section className="rounded-xl border border-gray-200 p-3 space-y-3">
+              <Field label="Amount collected (₹)"><input type="number" inputMode="decimal" min="0" disabled={readOnly} value={details.amount || ""} onChange={setD("amount")} className={inp} /></Field>
+              <div><div className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-2">Paid by</div>
+                <div className="grid grid-cols-3 gap-2">{["Cash","UPI","Cheque"].map(m => <button type="button" key={m} disabled={readOnly} onClick={() => setDetails(d => ({ ...d, mode: m }))} className={`py-3 rounded-lg border text-sm font-semibold ${details.mode === m ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300"}`}>{m}</button>)}</div></div>
+              <Field label="Receipt / reference no. (optional)"><input disabled={readOnly} value={details.ref || ""} onChange={setD("ref")} className={inp} /></Field>
+            </section>
+          )}
+          {vt === "Collection for alteration" && (
+            <section className="rounded-xl border border-gray-200 p-3 space-y-3">
+              <Field label="Pieces collected"><input type="number" inputMode="numeric" min="0" disabled={readOnly} value={details.pieces || ""} onChange={setD("pieces")} className={inp} /></Field>
+              <Field label="What needs altering?"><textarea rows="3" disabled={readOnly} value={details.reason || ""} onChange={setD("reason")} className={inp} placeholder="e.g. Living room main curtain 2 inch too long" /></Field>
+            </section>
+          )}
+          {(vt === "Upholstery" || vt === "Ironing") && (
+            <section className="rounded-xl border border-gray-200 p-3 space-y-3">
+              <Field label="Pieces done"><input type="number" inputMode="numeric" min="0" disabled={readOnly} value={details.pieces || ""} onChange={setD("pieces")} className={inp} /></Field>
+              <Field label="Rooms / items (optional)"><input disabled={readOnly} value={details.items || ""} onChange={setD("items")} className={inp} placeholder="e.g. Living room sofa, 2 chairs" /></Field>
+            </section>
+          )}
+          {vt === "Track installation" && (
+            <section className="rounded-xl border border-gray-200 p-3 space-y-3">
+              <Field label="Tracks installed"><input type="number" inputMode="numeric" min="0" disabled={readOnly} value={details.pieces || ""} onChange={setD("pieces")} className={inp} /></Field>
+            </section>
+          )}
+
+          {/* Photos + note */}
+          <section className="rounded-xl border border-gray-200 p-3 space-y-3">
+            {(existing?.photos || []).length > 0 && (
+              <div><div className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-1">Photos submitted</div>
+                <div className="grid grid-cols-3 gap-2">{existing.photos.map(p => <a key={p} href={jobPhotoUrl(p)} target="_blank" rel="noopener"><img src={jobPhotoUrl(p)} className="h-24 w-full object-cover rounded border" /></a>)}</div></div>
+            )}
+            {!readOnly && <FileField label={vt === "Measurement" ? "Measurement photos" : vt === "Cash collection" ? "Receipt photo (optional)" : "Photos of finished work"} files={files} setFiles={setFiles} hint="📷 Tap to add photos" />}
+            <Field label="Note for office (optional)"><textarea rows="2" disabled={readOnly} value={note} onChange={e => setNote(e.target.value)} className={inp} /></Field>
+          </section>
+
+          {!readOnly && mode === "unfinished" && (
+            <section className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+              <Field label="Why couldn't the job be finished?"><textarea rows="3" value={reason} onChange={e => setReason(e.target.value)} className={inp} placeholder="e.g. Customer not at home / 2 curtains short / wrong size" /></Field>
+            </section>
+          )}
+        </div>
+        {!readOnly && (
+          <div className="sticky bottom-0 bg-white border-t border-gray-200 p-4 pb-safe grid grid-cols-2 gap-2">
+            {mode === "unfinished"
+              ? <><button type="button" disabled={busy} onClick={() => setMode(null)} className="py-3 rounded-lg border border-gray-300 text-gray-700 font-semibold">Back</button>
+                  <button type="button" disabled={busy} onClick={() => finish("unfinished")} className="py-3 rounded-lg bg-amber-500 text-white font-semibold disabled:opacity-60">{busy ? "Saving…" : "Submit as unfinished"}</button></>
+              : <><button type="button" disabled={busy} onClick={() => setMode("unfinished")} className="py-3 rounded-lg border border-amber-400 text-amber-700 font-semibold">Could not finish</button>
+                  <button type="button" disabled={busy} onClick={() => finish("completed")} className="py-3 rounded-lg bg-green-600 text-white font-semibold disabled:opacity-60">{busy ? `Uploading ${files.length} photo${files.length === 1 ? "" : "s"}…` : "Mark complete ✓"}</button></>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FileField({ label, files, setFiles, hint }) {
   const [previews, setPreviews] = useState([]);
   useEffect(() => {
     const urls = files.map(f => URL.createObjectURL(f));
@@ -212,7 +455,7 @@ function FileField({ label, files, setFiles }) {
         </div>
       )}
       <label className="block border-2 border-dashed border-gray-300 rounded-lg p-3 text-center text-sm text-gray-600 cursor-pointer active:bg-gray-50">
-        <span>{files.length ? "➕ Add more screenshots" : "📷 Tap to attach Rapido screenshots (you can pick several)"}</span>
+        <span>{files.length ? "➕ Add more photos" : (hint || "📷 Tap to attach Rapido screenshots (you can pick several)")}</span>
         <input type="file" accept="image/*" multiple className="hidden" onChange={add} />
       </label>
     </div>
