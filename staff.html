@@ -185,7 +185,7 @@ function DayList({ staff, date, section, refreshKey, onChanged }) {
       if (!alive) return;
       const mm = (m.data || []).map(x => ({ kind:"meeting", id:x.id, time:x.timing_from || x.timing || "", customer:x.customer_name, mobile:x.mobile_number, address:[x.address, x.area].filter(Boolean).join(", "), visit:x.visit_type || "Meeting", partner: staff.role === "designer" ? x.support_name : x.designer_name, type:x.meeting_type, clientId:x.client_id }));
       const vv = (v.data || []).filter(x => sectionOf(x.visit_type || "Meeting") === section)
-        .map(x => ({ kind:"visit", id:x.id, time:x.timing || "", customer:x.customer_name, mobile:x.mobile, address:x.address || "", visit:x.visit_type || "", partner: staff.role === "designer" ? x.support_name : x.stylist, type:null, clientId:x.client_id, orderId:x.order_id, raw:x }));
+        .map(x => ({ kind:"visit", id:x.id, time:x.timing || "", customer:x.customer_name, mobile:x.mobile, address:x.address || "", visit:x.visit_type || "", partner: staff.role === "designer" ? x.support_name : x.stylist, type:null, clientId:x.client_id, orderId:x.order_id, installItems:x.install_items, raw:x }));
       setRows([...mm, ...vv].sort((a,b) => (timeToMinutes(a.time) ?? 9999) - (timeToMinutes(b.time) ?? 9999)));
       setExpenses(e.data || []);
       const jm = {}; (j.data || []).forEach(x => { jm[x.job_id] = x; }); setJobs(jm);
@@ -261,7 +261,8 @@ function JobSheet({ staff, date, row, existing, onClose, onSaved }) {
       .eq("id", row.orderId).single().then(({ data }) => setOrder(data || null));
   }, [row.orderId]);
 
-  const items = useMemo(() => checklistFromOrder(order), [order]);
+  // Only the curtains the office selected for this visit; fall back to the whole order for older visits
+  const items = useMemo(() => (Array.isArray(row.installItems) && row.installItems.length) ? row.installItems : checklistFromOrder(order), [order, row.installItems]);
   const ticked = items.filter(i => checks[i.key]).length;
   const setD = k => e => setDetails(d => ({ ...d, [k]: e.target.value }));
 

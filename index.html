@@ -1583,6 +1583,22 @@ function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVi
   );
 }
 
+// Per-layer installation items from an order: "Living room window 1" + Main / Sheer / Blind
+function orderInstallItems(order) {
+  const items = [];
+  (order?.windows || []).forEach((w, i) => {
+    const label = `${(w.roomLabel || "Room").trim()} window ${(w.windowIndex ?? i) + 1}`;
+    const kind = w.kind || "curtain";
+    if (kind === "curtain" || kind === "both") {
+      const ct = w.curtain_type || "Main";
+      if (ct === "Main" || ct === "Both") items.push({ key: `w${i}-main`, label, layer: "Main" });
+      if (ct === "Sheer" || ct === "Both") items.push({ key: `w${i}-sheer`, label, layer: "Sheer" });
+    }
+    if (kind === "blind" || kind === "both") items.push({ key: `w${i}-blind`, label, layer: "Blind" });
+  });
+  return items;
+}
+
 function AddVisitModal({ date, city, onClose, onSave }) {
   const [form, setForm] = useState({ visit_date: date, customer_name: "", address: "", stylist: "", support_name: "", visit_type: "Installation", timing: "", status: "", order_id: null, client_id: "", mobile: "" });
   const [saving, setSaving] = useState(false);
@@ -1614,12 +1630,44 @@ function AddVisitModal({ date, city, onClose, onSave }) {
       stylist: f.stylist || (DESIGNERS.includes(o.designer_name) ? o.designer_name : f.stylist) }));
     setQ(""); setHits([]);
   };
+  // --- Installation: pick which curtains are being installed on this visit ---
+  const [orderItems, setOrderItems] = useState(null);   // null = not loaded
+  const [prior, setPrior] = useState({});               // key -> "08 Oct (Completed)"
+  const [picked, setPicked] = useState({});
+  const isInstall = form.visit_type === "Installation";
+  useEffect(() => {
+    setOrderItems(null); setPrior({}); setPicked({});
+    if (!form.order_id) return;
+    let alive = true;
+    (async () => {
+      const [o, fv] = await Promise.all([
+        supabase.from("customer_orders").select("id,windows").eq("id", form.order_id).single(),
+        supabase.from("field_visits").select("visit_date,status,install_items").eq("order_id", form.order_id).is("deleted_at", null),
+      ]);
+      if (!alive) return;
+      setOrderItems(orderInstallItems(o.data));
+      const pr = {};
+      (fv.data || []).forEach(v => (v.install_items || []).forEach(it => {
+        const d = new Date(v.visit_date + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+        pr[it.key] = `${d}${v.status ? " · " + v.status : ""}`;
+      }));
+      setPrior(pr);
+    })();
+    return () => { alive = false; };
+  }, [form.order_id]);
+  const pickedCount = Object.values(picked).filter(Boolean).length;
+  const groups = useMemo(() => {
+    const g = []; (orderItems || []).forEach(it => { let x = g.find(y => y.label === it.label); if (!x) { x = { label: it.label, items: [] }; g.push(x); } x.items.push(it); });
+    return g;
+  }, [orderItems]);
   const submit = async (e) => {
     e.preventDefault();
     if (!form.customer_name.trim()) { setErr("Customer name is required."); return; }
     if (/install/i.test(form.visit_type) && !form.order_id) { setErr("Please link the customer's order so the installer gets the curtain checklist."); return; }
+    if (isInstall && orderItems && orderItems.length && pickedCount === 0) { setErr("Select the curtains being installed on this visit."); return; }
     setSaving(true); setErr(null);
-    try { await onSave(form); } catch (ex) { setErr(ex.message || "Could not save."); setSaving(false); }
+    const install_items = isInstall && orderItems ? orderItems.filter(it => picked[it.key]) : null;
+    try { await onSave({ ...form, install_items }); } catch (ex) { setErr(ex.message || "Could not save."); setSaving(false); }
   };
   return (
     <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-end sm:items-center justify-center sm:p-4" onClick={onClose}>
@@ -1662,6 +1710,38 @@ function AddVisitModal({ date, city, onClose, onSave }) {
           <Select label="Stylist" value={form.stylist} onChange={set("stylist")} options={DESIGNERS} allowEmpty />
           <Select label="Support staff" value={form.support_name} onChange={set("support_name")} options={supportFor(city)} allowEmpty />
           <Select label="Visit type" value={form.visit_type} onChange={set("visit_type")} options={VISIT_TYPES} wide />
+          {isInstall && form.order_id && (
+            <div className="sm:col-span-2 rounded-lg border border-gray-200">
+              <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 bg-gray-50 rounded-t-lg">
+                <div className="text-xs uppercase tracking-wider text-gray-600 font-semibold">Curtains to install on this visit <span className="normal-case tracking-normal text-gray-500">· {pickedCount} selected</span></div>
+                {orderItems && orderItems.length > 0 && (
+                  <div className="flex gap-3 text-xs font-medium">
+                    <button type="button" className="text-blue-600" onClick={() => setPicked(Object.fromEntries(orderItems.filter(it => !prior[it.key]).map(it => [it.key, true])))}>Select pending</button>
+                    <button type="button" className="text-blue-600" onClick={() => setPicked(Object.fromEntries(orderItems.map(it => [it.key, true])))}>All</button>
+                    <button type="button" className="text-gray-500" onClick={() => setPicked({})}>None</button>
+                  </div>
+                )}
+              </div>
+              {orderItems === null ? <div className="px-3 py-3 text-sm text-gray-500">Loading order…</div>
+                : orderItems.length === 0 ? <div className="px-3 py-3 text-sm text-gray-500">This order has no curtain or blind items.</div>
+                : <div className="max-h-72 overflow-y-auto divide-y divide-gray-100">
+                    {groups.map(g => (
+                      <div key={g.label} className="px-3 py-2">
+                        <div className="text-sm font-medium text-gray-900">{g.label}</div>
+                        <div className="flex flex-wrap gap-2 mt-1.5">
+                          {g.items.map(it => (
+                            <label key={it.key} className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm cursor-pointer ${picked[it.key] ? "bg-blue-50 border-blue-400 text-blue-800" : "bg-white border-gray-300 text-gray-700"}`}>
+                              <input type="checkbox" className="accent-blue-600" checked={!!picked[it.key]} onChange={e => setPicked(p => ({ ...p, [it.key]: e.target.checked }))} />
+                              {it.layer}
+                              {prior[it.key] && <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">{prior[it.key]}</span>}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>}
+            </div>
+          )}
         </div>
         <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 pb-safe flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
           <button type="button" onClick={onClose} className="w-full sm:w-auto px-4 py-3 rounded-lg bg-white hover:bg-gray-50 text-sm border border-gray-300 text-gray-700 font-medium min-h-[44px]">Cancel</button>
