@@ -101,6 +101,15 @@ const MAINT_TYPES = ["Measurement", "Collection for alteration", "Cash collectio
 const sectionOf = vt => INSTALL_TYPES.includes(vt) ? "install" : MAINT_TYPES.includes(vt) ? "maint" : "meetings";
 const STATUS_UI = { completed: ["Completed","bg-green-100 text-green-800"], unfinished: ["Unfinished","bg-amber-100 text-amber-800"], in_progress: ["In progress","bg-blue-100 text-blue-800"] };
 const jobPhotoUrl = path => publicUrl(path);
+const FEEDBACK_URL = "https://qrfy.io/2t7Yq4UQPX";
+const FEEDBACK_QR = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAUoAAAFKAQAAAABTUiuoAAABCGlDQ1BJQ0MgUHJvZmlsZQAAeJxjYGA8wQAELAYMDLl5JUVB7k4KEZFRCuwPGBiBEAwSk4sLGHADoKpv1yBqL+viUYcLcKakFicD6Q9ArFIEtBxopAiQLZIOYWuA2EkQtg2IXV5SUAJkB4DYRSFBzkB2CpCtkY7ETkJiJxcUgdT3ANk2uTmlyQh3M/Ck5oUGA2kOIJZhKGYIYnBncAL5H6IkfxEDg8VXBgbmCQixpJkMDNtbGRgkbiHEVBYwMPC3MDBsO48QQ4RJQWJRIliIBYiZ0tIYGD4tZ2DgjWRgEL7AwMAVDQsIHG5TALvNnSEfCNMZchhSgSKeDHkMyQx6QJYRgwGDIYMZAKbWPz9HbOBQAAACIUlEQVR42u2au43kMBBEX68IjEkBE8CEosngYrrMqFA2gANEcwEKdQapz+KcPa+NpiGIYllVKLJabBM/HOsHPx4BDWhAP6DaGG/AbAazeTeoiWMpBVleoJMkSVDNVGpC2o71RdKYBllOoMM9WQJ2g/oQ6wzdee8gywc0fZvtSYvAltIw8hZkOVarzv2hdd6AmlqQ5VCtEeNzS5BbMvKeWApAFlCDLDfQvec+qA/Zuz7E8vkQ1ASrmZnNQZYXb+WrQP6ynjLWeULQUJDlMBO+q1m3FYCk1r8Ng4W33HirPpugJa2vL9P6ElCf7W66mlqQ5QBKr4x7/ZsbKr3omqSSJZUTUoIsD2pt0xCldI3O2J4bLNskyKGWI2/9owyMaX+Et/x4C1jUusvuCjJJhVDLn7fOsUi6XDbemEItd/8y6rMBexI0gP1Yrc8gy0/KuHzUp8t2ZEKpETuhp53w1OOIg5Jaj4g9fsRO6CzBX6IwQkdPHuWqvIIsPzth41YJazsXiHrL4U7YYNmOiHi73+c8xoIsN3+ebr+f7t66DBZqeet56kLtZvYaNZi9gXGqBVnuep7sXR9SOe5JVNgtyPKWMvrxdD/GrnNrxMYgy1cXTb/QmsQ6bzKyYP31x0bRFWT59NYw2PYtg4S3vEC7POQ2bvXXeZJ+v8Z1f3RWe9oJzxwBGCRs2fbE8pkApjb6QIMsZz1Pk769CW6NT0FWQAP6H9C/XsrQJxs3gSEAAAAASUVORK5CYII=";
+// Tools the installer must carry — part of every installation checklist
+const INSTALL_TOOLS = [
+  { key: "tool-iron", label: "Iron machine" },
+  { key: "tool-tape", label: "Measuring tape" },
+  { key: "tool-screwdriver", label: "Screwdriver" },
+  { key: "tool-runners", label: "Extra runners" },
+];
 
 // Build the per-layer checklist from an order: "Living room window 1 — Main / Sheer / Blind"
 function checklistFromOrder(order) {
@@ -270,6 +279,7 @@ function JobSheet({ staff, date, row, existing, onClose, onSaved }) {
   // Only the curtains the office selected for this visit; fall back to the whole order for older visits
   const items = useMemo(() => (Array.isArray(row.installItems) && row.installItems.length) ? row.installItems : checklistFromOrder(order), [order, row.installItems]);
   const ticked = items.filter(i => checks[i.key]).length;
+  const toolsTicked = INSTALL_TOOLS.filter(t => checks[t.key]).length;
   const setD = k => e => setDetails(d => ({ ...d, [k]: e.target.value }));
 
   const persist = async (patch) => {
@@ -299,12 +309,14 @@ function JobSheet({ staff, date, row, existing, onClose, onSaved }) {
     return [...(existing?.photos || []), ...paths];
   };
   const validate = () => {
-    if (isInstall && items.length && ticked < items.length) return `Tick all ${items.length} items before marking complete (or choose "Could not finish").`;
+    if (isInstall && toolsTicked < INSTALL_TOOLS.length) return "Tick all the tools you are carrying (iron machine, measuring tape, screwdriver, extra runners).";
+    if (isInstall && items.length && ticked < items.length) return `Tick all ${items.length} curtains before marking complete (or choose "Could not finish").`;
     if (vt === "Measurement" && files.length === 0 && !(existing?.photos || []).length) return "Attach at least one measurement photo.";
     if (vt === "Cash collection") { if (!(Number(details.amount) > 0)) return "Enter the amount collected."; if (!details.mode) return "Select how the customer paid."; }
     if (vt === "Collection for alteration" && !(Number(details.pieces) > 0)) return "Enter how many pieces you collected.";
     if ((vt === "Upholstery" || vt === "Ironing") && !(Number(details.pieces) > 0)) return "Enter how many pieces were done.";
     if (files.length === 0 && !(existing?.photos || []).length && vt !== "Cash collection") return "Attach at least one photo of the finished work.";
+    if (isInstall && !details.feedback) return "Tell us if the customer filled the feedback form (Yes / No).";
     return null;
   };
   const finish = async (status) => {
@@ -364,6 +376,17 @@ function JobSheet({ staff, date, row, existing, onClose, onSaved }) {
                 {order.special_note && <div className="mt-2 text-sm bg-yellow-50 border border-yellow-200 rounded-lg p-2 text-yellow-900">📝 {order.special_note}</div>}
               </section>
               <section className="rounded-xl border border-gray-200 p-3">
+                <div className="flex items-baseline justify-between mb-1"><div className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Tools to carry</div><div className="text-xs font-semibold text-gray-700">{toolsTicked}/{INSTALL_TOOLS.length}</div></div>
+                <div className="divide-y divide-gray-100">
+                  {INSTALL_TOOLS.map(t => (
+                    <label key={t.key} className={`flex items-center gap-3 py-3 ${readOnly ? "" : "active:bg-gray-50"}`}>
+                      <input type="checkbox" disabled={readOnly} checked={!!checks[t.key]} onChange={e => setChecks(c => ({ ...c, [t.key]: e.target.checked }))} className="w-6 h-6 accent-green-600 shrink-0" />
+                      <span className={`text-base ${checks[t.key] ? "line-through text-gray-400" : "text-gray-900"}`}>{t.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </section>
+              <section className="rounded-xl border border-gray-200 p-3">
                 <div className="flex items-baseline justify-between mb-2"><div className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Installation checklist</div><div className="text-xs font-semibold text-gray-700">{ticked}/{items.length}</div></div>
                 <div className="h-1.5 bg-gray-100 rounded-full mb-3"><div className="h-1.5 bg-green-500 rounded-full transition-all" style={{ width: `${items.length ? ticked/items.length*100 : 0}%` }} /></div>
                 <div className="divide-y divide-gray-100">
@@ -415,6 +438,25 @@ function JobSheet({ staff, date, row, existing, onClose, onSaved }) {
             {!readOnly && <FileField label={vt === "Measurement" ? "Measurement photos" : vt === "Cash collection" ? "Receipt photo (optional)" : "Photos of finished work"} files={files} setFiles={setFiles} hint="📷 Tap to add photos" />}
             <Field label="Note for office (optional)"><textarea rows="2" disabled={readOnly} value={note} onChange={e => setNote(e.target.value)} className={inp} /></Field>
           </section>
+
+          {isInstall && (
+            <section className="rounded-xl border border-gray-200 p-3">
+              <div className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Customer feedback</div>
+              <div className="text-sm text-gray-600 mt-1">Ask the customer to scan this QR code and fill the feedback form.</div>
+              <div className="flex justify-center my-3"><img src={FEEDBACK_QR} alt="Customer feedback form QR code" className="w-56 h-56 border border-gray-200 rounded-lg p-2 bg-white" style={{ imageRendering: "pixelated" }} /></div>
+              <a href={FEEDBACK_URL} target="_blank" rel="noopener" className="block text-center text-sm text-blue-600 underline mb-3">Or open the form on this phone</a>
+              <div className="text-sm font-semibold text-gray-900 mb-2">Has the customer given feedback?</div>
+              <div className="grid grid-cols-2 gap-2">
+                {["Yes","No"].map(v => (
+                  <button type="button" key={v} disabled={readOnly} onClick={() => setDetails(d => ({ ...d, feedback: v }))}
+                    className={`py-3 rounded-lg border text-sm font-semibold ${details.feedback === v ? (v === "Yes" ? "bg-green-600 text-white border-green-600" : "bg-amber-500 text-white border-amber-500") : "bg-white text-gray-700 border-gray-300"}`}>{v === "Yes" ? "Yes, given ✓" : "No"}</button>
+                ))}
+              </div>
+              {details.feedback === "No" && (
+                <input disabled={readOnly} value={details.feedback_reason || ""} onChange={setD("feedback_reason")} placeholder="Why not? (optional) e.g. customer busy, will fill later" className={inp + " mt-2"} />
+              )}
+            </section>
+          )}
 
           {!readOnly && mode === "unfinished" && (
             <section className="rounded-xl border border-amber-300 bg-amber-50 p-3">
