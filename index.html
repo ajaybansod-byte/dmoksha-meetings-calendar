@@ -1636,7 +1636,7 @@ function AddVisitModal({ date, city, onClose, onSave }) {
   const [picked, setPicked] = useState({});
   const isInstall = form.visit_type === "Installation";
   useEffect(() => {
-    setOrderItems(null); setPrior({}); setPicked({});
+    setOrderItems(null); setPrior({}); setPicked({}); setExtras([]);
     if (!form.order_id) return;
     let alive = true;
     (async () => {
@@ -1655,7 +1655,13 @@ function AddVisitModal({ date, city, onClose, onSave }) {
     })();
     return () => { alive = false; };
   }, [form.order_id]);
-  const pickedCount = Object.values(picked).filter(Boolean).length;
+  const [extras, setExtras] = useState([]);   // custom "Other" items typed by the office
+  const [extraText, setExtraText] = useState("");
+  const addExtra = () => {
+    const t = extraText.trim(); if (!t) return;
+    setExtras(x => [...x, { key: `x-${Date.now()}-${x.length}`, label: t, layer: "" }]); setExtraText("");
+  };
+  const pickedCount = Object.values(picked).filter(Boolean).length + extras.length;
   const groups = useMemo(() => {
     const g = []; (orderItems || []).forEach(it => { let x = g.find(y => y.label === it.label); if (!x) { x = { label: it.label, items: [] }; g.push(x); } x.items.push(it); });
     return g;
@@ -1664,9 +1670,9 @@ function AddVisitModal({ date, city, onClose, onSave }) {
     e.preventDefault();
     if (!form.customer_name.trim()) { setErr("Customer name is required."); return; }
     if (/install/i.test(form.visit_type) && !form.order_id) { setErr("Please link the customer's order so the installer gets the curtain checklist."); return; }
-    if (isInstall && orderItems && orderItems.length && pickedCount === 0) { setErr("Select the curtains being installed on this visit."); return; }
+    if (isInstall && orderItems && (orderItems.length || extras.length) && pickedCount === 0) { setErr("Select the curtains being installed on this visit."); return; }
     setSaving(true); setErr(null);
-    const install_items = isInstall && orderItems ? orderItems.filter(it => picked[it.key]) : null;
+    const install_items = isInstall && orderItems ? [...orderItems.filter(it => picked[it.key]), ...extras] : null;
     try { await onSave({ ...form, install_items }); } catch (ex) { setErr(ex.message || "Could not save."); setSaving(false); }
   };
   return (
@@ -1740,6 +1746,28 @@ function AddVisitModal({ date, city, onClose, onSave }) {
                       </div>
                     ))}
                   </div>}
+              {orderItems !== null && (
+                <div className="px-3 py-2 border-t border-gray-200 bg-gray-50/60 rounded-b-lg">
+                  <div className="text-sm font-medium text-gray-900">Other</div>
+                  {extras.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-1.5">
+                      {extras.map(x => (
+                        <span key={x.key} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm bg-blue-50 border-blue-400 text-blue-800">
+                          {x.label}
+                          <button type="button" aria-label="Remove" onClick={() => setExtras(xs => xs.filter(y => y.key !== x.key))} className="text-blue-500 hover:text-red-600 leading-none text-base">×</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2 mt-1.5">
+                    <input value={extraText} onChange={e => setExtraText(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addExtra(); } }}
+                      placeholder="e.g. Tie-backs for living room, Pelmet, Hall window 2 main…"
+                      className="flex-1 min-w-0 bg-white border border-gray-300 rounded-md px-3 py-2 text-base sm:text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
+                    <button type="button" onClick={addExtra} disabled={!extraText.trim()} className="px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-semibold disabled:opacity-40">Add</button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
