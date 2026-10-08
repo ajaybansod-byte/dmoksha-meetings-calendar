@@ -113,7 +113,7 @@ function checklistFromOrder(order) {
       if (ct === "Main" || ct === "Both") items.push({ key: `w${i}-main`, label, layer: "Main" });
       if (ct === "Sheer" || ct === "Both") items.push({ key: `w${i}-sheer`, label, layer: "Sheer" });
     }
-    if (kind === "blind" || kind === "both") items.push({ key: `w${i}-blind`, label, layer: "Blind" + (w.blind?.blind_type ? ` (${w.blind.blind_type})` : "") });
+    if (kind === "blind" || kind === "both") items.push({ key: `w${i}-blind`, label, layer: "Blind" });
   });
   return items;
 }
