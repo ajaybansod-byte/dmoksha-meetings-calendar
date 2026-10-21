@@ -392,11 +392,12 @@ function CalendarApp({ user }) {
 
       {exportOpen && (
         <ExportModal
+          city={city}
           meetings={[
-            ...meetings.filter(m => (m.location || "Mumbai") === city).map(m => ({ ...m, _record: "Meeting" })),
-            ...fieldVisits.filter(v => (v.city || "Mumbai") === city).map(v => ({
+            ...meetings.map(m => ({ ...m, location: m.location || "Mumbai", _record: "Meeting" })),
+            ...fieldVisits.map(v => ({
               _record: "Field visit",
-              id: v.id, meeting_date: v.visit_date, location: v.city, deleted_at: v.deleted_at,
+              id: v.id, meeting_date: v.visit_date, location: v.city || "Mumbai", deleted_at: v.deleted_at,
               timing_from: v.timing, customer_name: v.customer_name, address: v.address,
               designer_name: v.stylist, support_name: v.support_name, visit_type: v.visit_type,
             })),
@@ -1220,7 +1221,9 @@ const EXPORT_COLUMNS = [
   { label: "Sales Journal", get: m => m.sj },
 ];
 
-function ExportModal({ meetings, onClose }) {
+function ExportModal({ meetings: allRows, city, onClose }) {
+  const [scope, setScope] = useState("city");   // "city" = selected city only, "all" = every location in one sheet
+  const meetings = scope === "all" ? allRows : allRows.filter(m => (m.location || "Mumbai") === city);
   const [preset, setPreset] = useState("month");
   const [from, setFrom]     = useState(rangeForPreset("month").from);
   const [to, setTo]         = useState(rangeForPreset("month").to);
@@ -1239,7 +1242,8 @@ function ExportModal({ meetings, onClose }) {
   const handleExport = () => {
     if (inRange.length === 0) { alert("No meetings in the selected range."); return; }
     const sorted = [...inRange].sort((a, b) => a.meeting_date !== b.meeting_date ? (a.meeting_date < b.meeting_date ? -1 : 1) : ((timeToMinutes(a.timing_from || a.timing) ?? 9999) - (timeToMinutes(b.timing_from || b.timing) ?? 9999)));
-    downloadCSV(`dmoksha_meetings_${from}_to_${to}.csv`, sorted, EXPORT_COLUMNS);
+    const tag = scope === "all" ? "all_locations" : city.toLowerCase();
+    downloadCSV(`dmoksha_meetings_${tag}_${from}_to_${to}.csv`, sorted, EXPORT_COLUMNS);
     onClose();
   };
 
@@ -1268,6 +1272,16 @@ function ExportModal({ meetings, onClose }) {
         </div>
         <div className="p-4 space-y-4">
           <div>
+            <div className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-2">Location</div>
+            <div className="grid grid-cols-2 gap-2">
+              {[["city", `${city} only`], ["all", "All locations"]].map(([k, l]) => (
+                <button key={k} type="button" onClick={() => setScope(k)}
+                  className={`px-3 py-2 rounded-lg border text-sm font-medium transition ${scope === k ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"}`}>{l}</button>
+              ))}
+            </div>
+            {scope === "all" && <div className="text-xs text-gray-500 mt-1.5">Mumbai, Pune and Bhubaneswar in one sheet — see the City column.</div>}
+          </div>
+          <div>
             <div className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-2">Date range</div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <PresetButton id="week">This week</PresetButton>
@@ -1289,7 +1303,7 @@ function ExportModal({ meetings, onClose }) {
             </label>
           </div>
           <div className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-3">
-            <span className="font-semibold text-gray-900">{inRange.length}</span> row{inRange.length === 1 ? "" : "s"} will be exported ({inRange.filter(m => m._record !== "Field visit").length} meetings, {inRange.filter(m => m._record === "Field visit").length} installations / field visits)
+            <span className="font-semibold text-gray-900">{inRange.length}</span> row{inRange.length === 1 ? "" : "s"} will be exported ({inRange.filter(m => m._record !== "Field visit").length} meetings, {inRange.filter(m => m._record === "Field visit").length} installations / field visits){scope === "all" && <> across {CITIES.filter(c => inRange.some(m => (m.location || "Mumbai") === c)).length || 0} location(s)</>}
             {inRange.length > 0 && (
               <span className="text-gray-500"> ({from} → {to})</span>
             )}
