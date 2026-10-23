@@ -1883,6 +1883,19 @@ function FieldTeamView({ city, user }) {
     setAllExpForBal(xs => xs.map(x => x.id === e.id ? { ...x, review_status: status } : x));
   };
 
+  const approveAll = async (list) => {
+    const pend = list.filter(e => (e.review_status || "pending") === "pending");
+    if (!pend.length) return;
+    const total = pend.reduce((t, e) => t + expTotal(e), 0);
+    if (!confirm(`Approve ${pend.length} pending bill${pend.length === 1 ? "" : "s"} worth ${inrA(total)}?`)) return;
+    const patch = { review_status: "approved", reviewed_by: user?.full_name || user?.email || "Admin", reviewed_at: new Date().toISOString(), review_note: null };
+    const ids = pend.map(e => e.id);
+    const { error } = await supabase.from("travel_expenses").update(patch).in("id", ids);
+    if (error) { alert("Could not approve: " + error.message); return; }
+    const set = new Set(ids);
+    setExps(xs => xs.map(x => set.has(x.id) ? { ...x, ...patch } : x));
+    setAllExpForBal(xs => xs.map(x => set.has(x.id) ? { ...x, review_status: "approved" } : x));
+  };
   const Tab = ({ id, children }) => <button onClick={() => setSub(id)} className={`px-4 py-2 rounded-full text-sm font-medium border ${sub === id ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"}`}>{children}</button>;
   const inputCls = "bg-white border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500";
   const th = "px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-600 whitespace-nowrap";
@@ -1968,7 +1981,11 @@ function FieldTeamView({ city, user }) {
             <div className="flex gap-1 p-1 bg-gray-100 rounded-lg text-sm">
               {["all", "pending", "approved", "rejected"].map(k => <button key={k} onClick={() => setRevFilter(k)} className={`px-3 py-1.5 rounded-md capitalize ${revFilter === k ? "bg-white shadow font-semibold text-gray-900" : "text-gray-600"}`}>{k}</button>)}
             </div>
-            <button onClick={exportExpenses} disabled={!ex.length} className="px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-semibold disabled:opacity-50">Download CSV</button>
+            <div className="flex gap-2">
+              {(() => { const n = ex.filter(e => (e.review_status || "pending") === "pending").length; return (
+                <button onClick={() => approveAll(ex)} disabled={!n} className="px-4 py-2 rounded-md bg-green-600 hover:bg-green-700 text-white text-sm font-semibold disabled:opacity-40">✓ Approve all pending{n ? ` (${n})` : ""}</button>); })()}
+              <button onClick={exportExpenses} disabled={!ex.length} className="px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-semibold disabled:opacity-50">Download CSV</button>
+            </div>
           </div>
           <div className="overflow-x-auto scrollbar-thin rounded-xl border border-gray-200 bg-white shadow-card">
             <table className="w-full text-sm">
