@@ -2008,6 +2008,7 @@ function FieldTeamView({ city, user }) {
                       <td className="px-3 py-2 whitespace-nowrap">
                         <span className={`text-[11px] font-semibold rounded px-1.5 py-0.5 ${ui[1]}`}>{ui[0]}</span>
                         {e.reviewed_by && <div className="text-[11px] text-gray-500 mt-0.5">{e.reviewed_by}{e.review_note ? ` — ${e.review_note}` : ""}</div>}
+                        {e.paid_on && <div className="text-[11px] font-semibold text-green-700 mt-0.5">Paid {fmtD(e.paid_on)}{e.payment_ref ? ` · ${e.payment_ref}` : ""}</div>}
                         <div className="flex gap-2 mt-1">
                           {rs !== "approved" && <button onClick={() => review(e, "approved")} className="text-xs font-semibold text-green-700 hover:underline">Approve</button>}
                           {rs !== "rejected" && <button onClick={() => review(e, "rejected")} className="text-xs font-semibold text-red-600 hover:underline">Reject</button>}
@@ -2058,6 +2059,183 @@ function FieldTeamView({ city, user }) {
 
       {sub === "cash" && <PettyCashPanel staff={staff} advs={ad} who={who} user={user} onChanged={reload} summary={summary} />}
     </section>
+  );
+}
+
+// =========================================================
+//        Accounts login: pay approved travel bills only
+// =========================================================
+function AccountsApp({ user }) {
+  const [cityF, setCityF] = useState("");
+  const [tab, setTab] = useState("topay");
+  const [rows, setRows] = useState(null);
+  const [staff, setStaff] = useState([]);
+  const [open, setOpen] = useState({});        // staff_id -> expanded
+  const [paying, setPaying] = useState(null);  // { staffName, bills }
+  const [tick, setTick] = useState(0);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    let alive = true; setRows(null); setErr(null);
+    (async () => {
+      const [e, s] = await Promise.all([
+        supabase.from("travel_expenses").select("*").eq("review_status", "approved").eq("payment_method", "UPI").order("expense_date", { ascending: true }),
+        supabase.from("staff").select("id,name,role,city,mobile"),
+      ]);
+      if (!alive) return;
+      if (e.error) { setErr(e.error.message); return; }
+      setRows(e.data || []); setStaff(s.data || []);
+    })();
+    return () => { alive = false; };
+  }, [tick]);
+  const staffById = Object.fromEntries(staff.map(s => [s.id, s]));
+  const inCity = r => !cityF || (r.city || staffById[r.staff_id]?.city || "Mumbai") === cityF;
+  const unpaid = (rows || []).filter(r => !r.paid_on && inCity(r));
+  const paid = (rows || []).filter(r => r.paid_on && inCity(r)).sort((a, b) => (b.paid_on || "").localeCompare(a.paid_on || "") || (b.expense_date || "").localeCompare(a.expense_date || ""));
+  const groups = [];
+  unpaid.forEach(r => { let g = groups.find(x => x.id === r.staff_id); if (!g) { g = { id: r.staff_id, name: r.staff_name, bills: [] }; groups.push(g); } g.bills.push(r); });
+  groups.sort((a, b) => a.name.localeCompare(b.name));
+  const dueTotal = unpaid.reduce((t, r) => t + expTotal(r), 0);
+  const th = "px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-600 whitespace-nowrap";
+
+  const exportPaid = () => downloadCSV(`dmoksha_travel_payments${cityF ? "_" + cityF.toLowerCase() : ""}.csv`, paid, [
+    { label: "Paid on", get: r => r.paid_on }, { label: "UTR / reference", get: r => r.payment_ref }, { label: "Paid by", get: r => r.paid_by },
+    { label: "Staff", get: r => r.staff_name }, { label: "City", get: r => r.city }, { label: "Bill date", get: r => r.expense_date },
+    { label: "Customer", get: r => r.customer_name }, { label: "Fare to", get: r => r.fare_to }, { label: "Fare back", get: r => r.fare_back }, { label: "Total", get: r => expTotal(r) },
+  ]);
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-4 min-w-0">
+            <Logo className="h-8 sm:h-10 shrink-0" />
+            <div className="hidden sm:block border-l border-gray-200 pl-4"><div className="font-semibold text-gray-900">Accounts · Travel payments</div><div className="text-xs text-gray-500">Approved UPI travel bills to reimburse</div></div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-right hidden sm:block"><div className="text-sm font-medium text-gray-900">{user.full_name}</div><div className="text-[11px] text-gray-500">Accounts</div></div>
+            <button onClick={() => supabase.auth.signOut()} className="px-3 py-2 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-50">Sign out</button>
+          </div>
+        </div>
+      </header>
+      <main className="max-w-6xl mx-auto px-4 py-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="flex gap-2">
+            <button onClick={() => setTab("topay")} className={`px-4 py-2 rounded-full text-sm font-medium border ${tab === "topay" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300"}`}>To pay {rows && <span className="ml-1">({unpaid.length})</span>}</button>
+            <button onClick={() => setTab("paid")} className={`px-4 py-2 rounded-full text-sm font-medium border ${tab === "paid" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300"}`}>Paid {rows && <span className="ml-1">({paid.length})</span>}</button>
+          </div>
+          <select value={cityF} onChange={e => setCityF(e.target.value)} className="bg-white border border-gray-300 rounded-md px-3 py-2 text-sm">
+            <option value="">All cities</option>{CITIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        {err && <div className="p-3 mb-4 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">Could not load: {err}</div>}
+        {rows === null && !err && <div className="text-center py-16 text-gray-500">Loading…</div>}
+
+        {rows && tab === "topay" && (
+          <div className="space-y-3">
+            <div className="bg-white border border-gray-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-2">
+              <div><div className="text-[11px] uppercase tracking-wider text-gray-500">Total to pay</div><div className="text-2xl font-bold text-gray-900">{inrA(dueTotal)}</div></div>
+              <div className="text-sm text-gray-600">{unpaid.length} approved bill{unpaid.length === 1 ? "" : "s"} · {groups.length} staff member{groups.length === 1 ? "" : "s"}</div>
+            </div>
+            {groups.length === 0 && <div className="text-center py-12 text-gray-500 bg-white border border-gray-200 rounded-xl">Nothing to pay right now. Bills appear here once the office approves them.</div>}
+            {groups.map(g => {
+              const amt = g.bills.reduce((t, r) => t + expTotal(r), 0); const st = staffById[g.id];
+              return (
+                <div key={g.id} className="bg-white border border-gray-200 rounded-xl shadow-card overflow-hidden">
+                  <div className="p-4 flex flex-wrap items-center justify-between gap-3">
+                    <button onClick={() => setOpen(o => ({ ...o, [g.id]: !o[g.id] }))} className="text-left">
+                      <div className="font-semibold text-gray-900">{g.name} <span className="text-xs text-gray-500 font-normal capitalize">· {st?.role || ""} · {st?.city || ""}</span></div>
+                      <div className="text-sm text-gray-600">{g.bills.length} bill{g.bills.length === 1 ? "" : "s"} · {fmtD(g.bills[0].expense_date)} – {fmtD(g.bills[g.bills.length - 1].expense_date)}{st?.mobile ? ` · UPI/mobile ${st.mobile}` : ""} <span className="text-blue-600 ml-1">{open[g.id] ? "Hide bills ▲" : "View bills ▼"}</span></div>
+                    </button>
+                    <div className="flex items-center gap-3">
+                      <div className="text-xl font-bold text-gray-900">{inrA(amt)}</div>
+                      <button onClick={() => setPaying({ name: g.name, bills: g.bills })} className="px-4 py-2 rounded-md bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">Mark paid</button>
+                    </div>
+                  </div>
+                  {open[g.id] && (
+                    <div className="border-t border-gray-100 overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead><tr className="bg-gray-50"><th className={th}>Date</th><th className={th}>Customer</th><th className={th}>To</th><th className={th}>Back</th><th className={th}>Total</th><th className={th}>Approved by</th><th className={th}></th></tr></thead>
+                        <tbody>{g.bills.map(r => (
+                          <tr key={r.id} className="border-t border-gray-100 align-top">
+                            <td className="px-3 py-2 whitespace-nowrap">{fmtD(r.expense_date)}</td>
+                            <td className="px-3 py-2">{r.customer_name || "—"}{r.note && <div className="text-xs text-gray-500">{r.note}</div>}</td>
+                            <td className="px-3 py-2">{inrA(r.fare_to)}<div className="mt-1"><Thumbs paths={expPaths(r, "to")} /></div></td>
+                            <td className="px-3 py-2">{inrA(r.fare_back)}<div className="mt-1"><Thumbs paths={expPaths(r, "back")} /></div></td>
+                            <td className="px-3 py-2 font-semibold">{inrA(expTotal(r))}</td>
+                            <td className="px-3 py-2 text-xs text-gray-500">{r.reviewed_by || ""}</td>
+                            <td className="px-3 py-2"><button onClick={() => setPaying({ name: g.name, bills: [r] })} className="text-xs font-semibold text-green-700 hover:underline whitespace-nowrap">Pay this only</button></td>
+                          </tr>))}</tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>);
+            })}
+          </div>
+        )}
+
+        {rows && tab === "paid" && (
+          <div className="space-y-3">
+            <div className="flex justify-end"><button onClick={exportPaid} disabled={!paid.length} className="px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-semibold disabled:opacity-50">Download CSV</button></div>
+            <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-card">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-gray-200 bg-gray-50"><th className={th}>Paid on</th><th className={th}>UTR / ref</th><th className={th}>Staff</th><th className={th}>Bill date</th><th className={th}>Customer</th><th className={th}>Amount</th><th className={th}>Paid by</th><th className={th}></th></tr></thead>
+                <tbody>
+                  {paid.map(r => (
+                    <tr key={r.id} className="border-b border-gray-100 last:border-0">
+                      <td className="px-3 py-2 whitespace-nowrap">{fmtD(r.paid_on)}</td><td className="px-3 py-2 font-mono text-xs">{r.payment_ref || "—"}</td>
+                      <td className="px-3 py-2">{r.staff_name}</td><td className="px-3 py-2 whitespace-nowrap">{fmtD(r.expense_date)}</td>
+                      <td className="px-3 py-2">{r.customer_name || "—"}</td><td className="px-3 py-2 font-semibold">{inrA(expTotal(r))}</td>
+                      <td className="px-3 py-2 text-xs text-gray-500">{r.paid_by}</td>
+                      <td className="px-3 py-2"><button onClick={async () => {
+                        if (!confirm("Undo this payment? The bill goes back to To pay.")) return;
+                        const { error } = await supabase.from("travel_expenses").update({ paid_on: null, paid_by: null, payment_ref: null, paid_at: null }).eq("id", r.id);
+                        if (error) alert(error.message); else setTick(t => t + 1);
+                      }} className="text-xs text-gray-500 hover:underline">Undo</button></td>
+                    </tr>))}
+                  {paid.length === 0 && <tr><td colSpan="8" className="text-center py-10 text-gray-500">No payments recorded yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </main>
+      {paying && <MarkPaidModal user={user} paying={paying} onClose={() => setPaying(null)} onDone={() => { setPaying(null); setTick(t => t + 1); }} />}
+    </div>
+  );
+}
+
+function MarkPaidModal({ user, paying, onClose, onDone }) {
+  const d = new Date(); const p = n => String(n).padStart(2, "0");
+  const [on, setOn] = useState(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`);
+  const [ref, setRef] = useState(""); const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
+  const total = paying.bills.reduce((t, r) => t + expTotal(r), 0);
+  const save = async (e) => {
+    e.preventDefault();
+    if (!ref.trim()) { setErr("Enter the UTR / transaction reference."); return; }
+    setBusy(true);
+    const { error } = await supabase.from("travel_expenses").update({ paid_on: on, payment_ref: ref.trim(), paid_by: user.full_name || user.email, paid_at: new Date().toISOString() })
+      .in("id", paying.bills.map(b => b.id)).is("paid_on", null);
+    setBusy(false);
+    if (error) { setErr(error.message); return; }
+    onDone();
+  };
+  const inp = "mt-1 w-full bg-white border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:border-blue-500";
+  return (
+    <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4" onClick={onClose}>
+      <form onSubmit={save} className="bg-white rounded-2xl w-full max-w-sm shadow-card" onClick={e => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-gray-200 font-semibold">Mark paid · {paying.name}</div>
+        <div className="p-4 space-y-3">
+          <div className="text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-3">{paying.bills.length} bill{paying.bills.length === 1 ? "" : "s"} · <b>{inrA(total)}</b></div>
+          {err && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">{err}</div>}
+          <label className="block"><span className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Paid on</span><input type="date" value={on} onChange={e => setOn(e.target.value)} className={inp} /></label>
+          <label className="block"><span className="text-xs uppercase tracking-wider text-gray-500 font-semibold">UTR / transaction ref *</span><input value={ref} onChange={e => setRef(e.target.value)} placeholder="e.g. 429817364512" className={inp} /></label>
+        </div>
+        <div className="px-4 py-3 border-t border-gray-200 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-md border border-gray-300 text-sm">Cancel</button>
+          <button disabled={busy} className="px-4 py-2 rounded-md bg-green-600 text-white text-sm font-semibold disabled:opacity-60">{busy ? "Saving…" : `Confirm ${inrA(total)} paid`}</button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -2366,6 +2544,7 @@ function App() {
       </AuthShell>
     );
   }
+  if (profile.role === "accounts") return <AccountsApp user={profile} />;   // accounts team: travel payments only
   return <CalendarApp user={profile} />;
 }
 
