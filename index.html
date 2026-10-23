@@ -2066,6 +2066,8 @@ function FieldTeamView({ city, user }) {
 //        Accounts login: pay approved travel bills only
 // =========================================================
 function AccountsApp({ user }) {
+  const [section, setSection] = useState("fieldteam");   // "fieldteam" | "payments"
+  const [ftCity, setFtCity] = useState("Mumbai");
   const [cityF, setCityF] = useState("");
   const [tab, setTab] = useState("topay");
   const [rows, setRows] = useState(null);
@@ -2086,7 +2088,7 @@ function AccountsApp({ user }) {
       setRows(e.data || []); setStaff(s.data || []);
     })();
     return () => { alive = false; };
-  }, [tick]);
+  }, [tick, section]);
   const staffById = Object.fromEntries(staff.map(s => [s.id, s]));
   const inCity = r => !cityF || (r.city || staffById[r.staff_id]?.city || "Mumbai") === cityF;
   const unpaid = (rows || []).filter(r => !r.paid_on && inCity(r));
@@ -2109,7 +2111,12 @@ function AccountsApp({ user }) {
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-4 min-w-0">
             <Logo className="h-8 sm:h-10 shrink-0" />
-            <div className="hidden sm:block border-l border-gray-200 pl-4"><div className="font-semibold text-gray-900">Accounts · Travel payments</div><div className="text-xs text-gray-500">Approved UPI travel bills to reimburse</div></div>
+            <div className="hidden md:block border-l border-gray-200 pl-4"><div className="font-semibold text-gray-900">Accounts</div><div className="text-xs text-gray-500">Field team expenses & payments</div></div>
+          </div>
+          <div className="flex rounded-full overflow-hidden border border-gray-300 bg-gray-50 shrink-0">
+            {[["fieldteam", "Field team"], ["payments", "Payments"]].map(([k, l]) => (
+              <button key={k} onClick={() => setSection(k)} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium ${section === k ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>{l}</button>
+            ))}
           </div>
           <div className="flex items-center gap-3">
             <div className="text-right hidden sm:block"><div className="text-sm font-medium text-gray-900">{user.full_name}</div><div className="text-[11px] text-gray-500">Accounts</div></div>
@@ -2117,7 +2124,18 @@ function AccountsApp({ user }) {
           </div>
         </div>
       </header>
-      <main className="max-w-6xl mx-auto px-4 py-5">
+      {section === "fieldteam" && (
+        <main className="max-w-7xl mx-auto px-4 py-5">
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-xs uppercase tracking-wider text-gray-500 font-semibold">City</span>
+            <div className="flex rounded-full overflow-hidden border border-gray-300 bg-white">
+              {CITIES.map(c => <button key={c} onClick={() => setFtCity(c)} className={`px-4 py-2 text-sm font-medium ${ftCity === c ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-50"}`}>{c}</button>)}
+            </div>
+          </div>
+          <FieldTeamView city={ftCity} user={user} />
+        </main>
+      )}
+      {section === "payments" && <main className="max-w-6xl mx-auto px-4 py-5">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div className="flex gap-2">
             <button onClick={() => setTab("topay")} className={`px-4 py-2 rounded-full text-sm font-medium border ${tab === "topay" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300"}`}>To pay {rows && <span className="ml-1">({unpaid.length})</span>}</button>
@@ -2198,7 +2216,7 @@ function AccountsApp({ user }) {
             </div>
           </div>
         )}
-      </main>
+      </main>}
       {paying && <MarkPaidModal user={user} paying={paying} onClose={() => setPaying(null)} onDone={() => { setPaying(null); setTick(t => t + 1); }} />}
     </div>
   );
