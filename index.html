@@ -2069,6 +2069,9 @@ function AccountsApp({ user }) {
   const [section, setSection] = useState("fieldteam");   // "fieldteam" | "payments"
   const [ftCity, setFtCity] = useState("Mumbai");
   const [cityF, setCityF] = useState("");
+  const [roleF, setRoleF] = useState("");      // "" | "designer" | "support"
+  const [personF, setPersonF] = useState("");  // staff_id
+  const [dFrom, setDFrom] = useState(""); const [dTo, setDTo] = useState("");
   const [tab, setTab] = useState("topay");
   const [rows, setRows] = useState(null);
   const [staff, setStaff] = useState([]);
@@ -2090,12 +2093,19 @@ function AccountsApp({ user }) {
     return () => { alive = false; };
   }, [tick, section]);
   const staffById = Object.fromEntries(staff.map(s => [s.id, s]));
-  const inCity = r => !cityF || (r.city || staffById[r.staff_id]?.city || "Mumbai") === cityF;
+  const inCity = r => (!cityF || (r.city || staffById[r.staff_id]?.city || "Mumbai") === cityF)
+    && (!roleF || staffById[r.staff_id]?.role === roleF)
+    && (!personF || r.staff_id === personF)
+    && (!dFrom || r.expense_date >= dFrom) && (!dTo || r.expense_date <= dTo);
+  // people who have approved UPI bills, for the filter dropdown
+  const people = Object.values(Object.fromEntries((rows || []).map(r => [r.staff_id, { id: r.staff_id, name: r.staff_name, role: staffById[r.staff_id]?.role || "", city: r.city || staffById[r.staff_id]?.city || "" }])))
+    .filter(x => (!cityF || x.city === cityF) && (!roleF || x.role === roleF)).sort((a, b) => a.name.localeCompare(b.name));
   const unpaid = (rows || []).filter(r => !r.paid_on && inCity(r));
   const paid = (rows || []).filter(r => r.paid_on && inCity(r)).sort((a, b) => (b.paid_on || "").localeCompare(a.paid_on || "") || (b.expense_date || "").localeCompare(a.expense_date || ""));
   const groups = [];
   unpaid.forEach(r => { let g = groups.find(x => x.id === r.staff_id); if (!g) { g = { id: r.staff_id, name: r.staff_name, bills: [] }; groups.push(g); } g.bills.push(r); });
-  groups.sort((a, b) => a.name.localeCompare(b.name));
+  const roleRank = id => (staffById[id]?.role === "designer" ? 0 : 1);
+  groups.sort((a, b) => roleRank(a.id) - roleRank(b.id) || a.name.localeCompare(b.name));
   const dueTotal = unpaid.reduce((t, r) => t + expTotal(r), 0);
   const th = "px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-600 whitespace-nowrap";
 
@@ -2141,9 +2151,23 @@ function AccountsApp({ user }) {
             <button onClick={() => setTab("topay")} className={`px-4 py-2 rounded-full text-sm font-medium border ${tab === "topay" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300"}`}>To pay {rows && <span className="ml-1">({unpaid.length})</span>}</button>
             <button onClick={() => setTab("paid")} className={`px-4 py-2 rounded-full text-sm font-medium border ${tab === "paid" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300"}`}>Paid {rows && <span className="ml-1">({paid.length})</span>}</button>
           </div>
-          <select value={cityF} onChange={e => setCityF(e.target.value)} className="bg-white border border-gray-300 rounded-md px-3 py-2 text-sm">
-            <option value="">All cities</option>{CITIES.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
+          <div className="flex flex-wrap items-center gap-2">
+            <select value={cityF} onChange={e => { setCityF(e.target.value); setPersonF(""); }} className="bg-white border border-gray-300 rounded-md px-3 py-2 text-sm">
+              <option value="">All cities</option>{CITIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select value={roleF} onChange={e => { setRoleF(e.target.value); setPersonF(""); }} className="bg-white border border-gray-300 rounded-md px-3 py-2 text-sm">
+              <option value="">Designers & support</option><option value="designer">Designers only</option><option value="support">Support staff only</option>
+            </select>
+            <select value={personF} onChange={e => setPersonF(e.target.value)} className="bg-white border border-gray-300 rounded-md px-3 py-2 text-sm">
+              <option value="">All people</option>
+              {["designer", "support"].map(rl => { const list = people.filter(x => x.role === rl); return list.length ? (
+                <optgroup key={rl} label={rl === "designer" ? "Designers" : "Support staff"}>{list.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</optgroup>) : null; })}
+            </select>
+            <input type="date" value={dFrom} onChange={e => setDFrom(e.target.value)} title="Bill date from" className="bg-white border border-gray-300 rounded-md px-3 py-2 text-sm" />
+            <span className="text-gray-400">→</span>
+            <input type="date" value={dTo} onChange={e => setDTo(e.target.value)} title="Bill date to" className="bg-white border border-gray-300 rounded-md px-3 py-2 text-sm" />
+            {(cityF || roleF || personF || dFrom || dTo) && <button onClick={() => { setCityF(""); setRoleF(""); setPersonF(""); setDFrom(""); setDTo(""); }} className="text-sm text-blue-600 hover:underline">Clear</button>}
+          </div>
         </div>
         {err && <div className="p-3 mb-4 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">Could not load: {err}</div>}
         {rows === null && !err && <div className="text-center py-16 text-gray-500">Loading…</div>}
@@ -2193,6 +2217,13 @@ function AccountsApp({ user }) {
 
         {rows && tab === "paid" && (
           <div className="space-y-3">
+            {paid.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {Object.values(paid.reduce((m, r) => { (m[r.staff_id] = m[r.staff_id] || { name: r.staff_name, n: 0, amt: 0 }); m[r.staff_id].n++; m[r.staff_id].amt += expTotal(r); return m; }, {}))
+                  .sort((a, b) => b.amt - a.amt).map(x => (
+                  <div key={x.name} className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm"><span className="font-medium text-gray-900">{x.name}</span> <span className="text-gray-500">· {x.n} bill{x.n === 1 ? "" : "s"} ·</span> <b>{inrA(x.amt)}</b></div>))}
+              </div>
+            )}
             <div className="flex justify-end"><button onClick={exportPaid} disabled={!paid.length} className="px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-semibold disabled:opacity-50">Download CSV</button></div>
             <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-card">
               <table className="w-full text-sm">
