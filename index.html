@@ -1499,6 +1499,10 @@ function WorkloadView({ meetings, fieldVisits, city, focus }) {
   );
 }
 
+// Day-of outcome for a scheduled meeting / visit (separate from the customer's sales status)
+const VISIT_STATUSES = ["Done", "Cancel", "Rescheduled"];
+const VISIT_STATUS_STYLE = { Done: "!bg-green-50 !border-green-400 text-green-800", Cancel: "!bg-red-50 !border-red-400 text-red-700", Rescheduled: "!bg-amber-50 !border-amber-400 text-amber-800" };
+
 function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVisit, onAddVisit, onDeleteVisit, onEditMeeting, onOpenWorkload }) {
   const [date, setDate] = useState(toISO(new Date()));
   const [adding, setAdding] = useState(false);
@@ -1508,10 +1512,10 @@ function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVi
 
   const mRows = meetings
     .filter(m => !m.deleted_at && (m.location || "Mumbai") === city && m.meeting_date === date)
-    .map(m => ({ kind: "meeting", id: m.id, customer: m.customer_name || "", address: m.address || m.area || "", stylist: m.designer_name || "", support: m.support_name || "", visit: m.visit_type || "Meeting", time: m.timing_from || m.timing || "", status: m.status || "", raw: m }));
+    .map(m => ({ kind: "meeting", id: m.id, customer: m.customer_name || "", address: m.address || m.area || "", stylist: m.designer_name || "", support: m.support_name || "", visit: m.visit_type || "Meeting", time: m.timing_from || m.timing || "", status: m.status || "", vstatus: m.visit_status || "", raw: m }));
   const vRows = fieldVisits
     .filter(v => !v.deleted_at && (v.city || "Mumbai") === city && v.visit_date === date)
-    .map(v => ({ kind: "visit", id: v.id, customer: v.customer_name || "", address: v.address || "", stylist: v.stylist || "", support: v.support_name || "", visit: v.visit_type || "", time: v.timing || "", status: v.status || "", raw: v }));
+    .map(v => ({ kind: "visit", id: v.id, customer: v.customer_name || "", address: v.address || "", stylist: v.stylist || "", support: v.support_name || "", visit: v.visit_type || "", time: v.timing || "", status: v.status || "", vstatus: v.visit_status || "", raw: v }));
   const rows = [...mRows, ...vRows].sort((a, b) => (timeToMinutes(a.time) ?? 9999) - (timeToMinutes(b.time) ?? 9999));
 
   const SHEET_HEADERS = ["Date", "Customer name", "Address", "Stylist", "Support staff name", "Visit type", "Time"];
@@ -1562,7 +1566,7 @@ function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVi
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
-              {["Time", "Customer", "Address", "Stylist", "Support staff", "Visit type", ""].map((h, i) => (
+              {["Time", "Customer", "Address", "Stylist", "Support staff", "Visit type", "Status", ""].map((h, i) => (
                 <th key={i} className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-600 whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -1591,6 +1595,14 @@ function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVi
                     {VISIT_TYPES.map(n => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </td>
+                <td className="px-3 py-2 min-w-[140px]">
+                  <select value={r.vstatus} onChange={e => setField(r, "visit_status", e.target.value)}
+                    title="Done = process completed · Cancel = cancelled for that day · Rescheduled = moved to another day"
+                    className={`${selCls} font-semibold ${VISIT_STATUS_STYLE[r.vstatus] || ""}`}>
+                    <option value="">— status —</option>
+                    {VISIT_STATUSES.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </td>
                 <td className="px-3 py-2 whitespace-nowrap">
                   {r.kind === "meeting"
                     ? <button onClick={() => onEditMeeting(r.raw)} className="text-blue-600 hover:text-blue-800 text-xs font-semibold">Edit</button>
@@ -1602,7 +1614,7 @@ function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVi
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan="7" className="text-center py-12 text-gray-500">No meetings or visits on {fmtSheetDate(date)} in {city}. Use "+ Add visit" for installations, measurements or collections.</td></tr>
+              <tr><td colSpan="8" className="text-center py-12 text-gray-500">No meetings or visits on {fmtSheetDate(date)} in {city}. Use "+ Add visit" for installations, measurements or collections.</td></tr>
             )}
           </tbody>
         </table>
