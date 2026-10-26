@@ -482,7 +482,7 @@ function Header({ view, setView, onAddNew, onExport, deletedCount, user }) {
 // =========================================================
 function FilterBar({ meetings, filters, setFilters, totalCount, filteredCount }) {
   const designers = useMemo(
-    () => Array.from(new Set(meetings.map(m => m.designer_name).filter(Boolean))).sort(),
+    () => Array.from(new Set([...DESIGNERS, ...meetings.map(m => m.designer_name).filter(Boolean)])).sort(),
     [meetings]
   );
   const activeCount = ["designer", "type", "status", "q"].filter(k => filters[k]).length;
@@ -2554,7 +2554,7 @@ function SetPasswordModal({ onClose }) {
 }
 
 // People who also have an office (ERP) login but should only use the support-team portal
-const PORTAL_ONLY_EMAILS = ["piyush.motwani@dmoksha.com"];
+const PORTAL_ONLY_EMAILS = [];   // Piyush (calling team) has full calendar access again
 
 function App() {
   const [session, setSession] = useState(undefined);
