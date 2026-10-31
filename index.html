@@ -156,6 +156,7 @@ function CalendarApp({ user }) {
   const [exportOpen, setExportOpen] = useState(false);
   const [fieldVisits, setFieldVisits] = useState([]);
   const [workloadFocus, setWorkloadFocus] = useState(null);
+  const [editingVisit, setEditingVisit] = useState(null);   // field visit being edited from the Installations tab
   const [city, setCity] = useState(() => { try { const v = localStorage.getItem("dmoksha.city"); return CITIES.includes(v) ? v : "Mumbai"; } catch { return "Mumbai"; } });
   useEffect(() => { try { localStorage.setItem("dmoksha.city", city); } catch {} }, [city]);
 
@@ -366,10 +367,12 @@ function CalendarApp({ user }) {
             <WorkloadView meetings={meetings} fieldVisits={fieldVisits} city={city} focus={workloadFocus} />
           ) : view === "fieldteam" ? (
             <FieldTeamView city={city} user={user} />
+          ) : view === "installations" ? (
+            <InstallationsView city={city} fieldVisits={fieldVisits} user={user} onAddVisit={addFieldVisit} onEditVisit={(v) => setEditingVisit(v)} />
           ) : (
             <TrashView meetings={deletedMeetings} onRestore={handleRestore} onHardDelete={handleHardDelete} />
           )}
-          {view !== "trash" && view !== "schedule" && view !== "workload" && view !== "fieldteam" && <Legend />}
+          {view !== "trash" && view !== "schedule" && view !== "workload" && view !== "fieldteam" && view !== "installations" && <Legend />}
         </main>
       )}
 
@@ -392,6 +395,7 @@ function CalendarApp({ user }) {
         />
       )}
 
+      {editingVisit && <AddVisitModal date={editingVisit.visit_date} city={city} initial={editingVisit} onClose={() => setEditingVisit(null)} onSave={async (p) => { await addFieldVisit({ ...p, id: editingVisit.id }); setEditingVisit(null); }} />}
       {exportOpen && (
         <ExportModal
           city={city}
@@ -435,6 +439,7 @@ function Header({ view, setView, onAddNew, onExport, deletedCount, user }) {
             <button onClick={() => setView("calendar")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition ${view === "calendar" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>Calendar</button>
             <button onClick={() => setView("list")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition ${view === "list" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>List</button>
             <button onClick={() => setView("schedule")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition ${view === "schedule" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>Scheduling</button>
+            <button onClick={() => setView("installations")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition ${view === "installations" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>Installations</button>
             <button onClick={() => setView("workload")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition ${view === "workload" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>Workload</button>
             <button onClick={() => setView("fieldteam")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition ${view === "fieldteam" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>Field team</button>
             <button onClick={() => setView("trash")} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition inline-flex items-center gap-1 ${view === "trash" ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>
@@ -1643,12 +1648,12 @@ function orderInstallItems(order) {
 }
 
 function AddVisitModal({ date, city, initial, onClose, onSave }) {
-  const isEdit = !!initial;
+  const isEdit = !!(initial && initial.id);   // initial without id = prefill for a new visit
   const [form, setForm] = useState(isEdit
     ? { visit_date: initial.visit_date || date, customer_name: initial.customer_name || "", address: initial.address || "", stylist: initial.stylist || "", support_name: initial.support_name || "",
         visit_type: initial.visit_type || "Installation", timing: initial.timing || "", status: initial.status || "", order_id: initial.order_id || null, client_id: initial.client_id || "", mobile: initial.mobile || "" }
     : { visit_date: date, customer_name: "", address: "", stylist: "", support_name: "", visit_type: "Installation", timing: "", status: "", order_id: null, client_id: "", mobile: "" });
-  const keepSelection = React.useRef(isEdit);   // on first load of an edit, keep the saved curtain selection
+  const keepSelection = React.useRef(!!initial);   // on first load of an edit, keep the saved curtain selection
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
@@ -1687,7 +1692,7 @@ function AddVisitModal({ date, city, initial, onClose, onSave }) {
     setOrderItems(null); setPrior({});
     if (keepSelection.current) {
       keepSelection.current = false;
-      const saved = initial.install_items || [];
+      const saved = Array.isArray(initial.install_items) ? initial.install_items : [];
       setPicked(Object.fromEntries(saved.filter(it => !String(it.key).startsWith("x-")).map(it => [it.key, true])));
       setExtras(saved.filter(it => String(it.key).startsWith("x-")));
     } else { setPicked({}); setExtras([]); }
@@ -2136,7 +2141,7 @@ function AccountsApp({ user }) {
             <div className="hidden md:block border-l border-gray-200 pl-4"><div className="font-semibold text-gray-900">Accounts</div><div className="text-xs text-gray-500">Field team expenses & payments</div></div>
           </div>
           <div className="flex rounded-full overflow-hidden border border-gray-300 bg-gray-50 shrink-0">
-            {[["fieldteam", "Field team"], ["payments", "Payments"]].map(([k, l]) => (
+            {[["fieldteam", "Field team"], ["installations", "Installations"], ["payments", "Payments"]].map(([k, l]) => (
               <button key={k} onClick={() => setSection(k)} className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium ${section === k ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}>{l}</button>
             ))}
           </div>
@@ -2157,6 +2162,7 @@ function AccountsApp({ user }) {
           <FieldTeamView city={ftCity} user={user} />
         </main>
       )}
+      {section === "installations" && <AccountsInstallations user={user} />}
       {section === "payments" && <main className="max-w-6xl mx-auto px-4 py-5">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div className="flex gap-2">
@@ -2265,6 +2271,19 @@ function AccountsApp({ user }) {
   );
 }
 
+function AccountsInstallations({ user }) {
+  const [city, setCity] = useState("Mumbai");
+  const [fieldVisits, setFieldVisits] = useState([]);
+  useEffect(() => { supabase.from("field_visits").select("*").is("deleted_at", null).order("visit_date").then(r => setFieldVisits(r.data || [])); }, []);
+  return (
+    <main className="max-w-7xl mx-auto px-4 py-5">
+      <div className="flex items-center gap-2 mb-4"><span className="text-xs uppercase tracking-wider text-gray-500 font-semibold">City</span>
+        <div className="flex rounded-full overflow-hidden border border-gray-300 bg-white">{CITIES.map(c => <button key={c} onClick={() => setCity(c)} className={`px-4 py-2 text-sm font-medium ${city === c ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-50"}`}>{c}</button>)}</div></div>
+      <InstallationsView city={city} fieldVisits={fieldVisits} user={user} readOnly onAddVisit={async () => {}} onEditVisit={() => {}} />
+    </main>
+  );
+}
+
 function MarkPaidModal({ user, paying, onClose, onDone }) {
   const d = new Date(); const p = n => String(n).padStart(2, "0");
   const [on, setOn] = useState(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`);
@@ -2296,6 +2315,526 @@ function MarkPaidModal({ user, paying, onClose, onDone }) {
           <button disabled={busy} className="px-4 py-2 rounded-md bg-green-600 text-white text-sm font-semibold disabled:opacity-60">{busy ? "Saving…" : `Confirm ${inrA(total)} paid`}</button>
         </div>
       </form>
+    </div>
+  );
+}
+
+// =========================================================
+//     Installations / Delivered (operations: outcomes, alterations, costs)
+// =========================================================
+const OUTCOME_UI = {
+  installed:   ["Installed",            "bg-green-100 text-green-800 border-green-300"],
+  partial:     ["Partially installed",  "bg-amber-100 text-amber-800 border-amber-300"],
+  alteration:  ["Alteration raised",    "bg-red-100 text-red-700 border-red-300"],
+  cancelled:   ["Cancelled",            "bg-gray-100 text-gray-600 border-gray-300"],
+  rescheduled: ["Rescheduled",          "bg-blue-100 text-blue-800 border-blue-300"],
+};
+const ISSUE_TYPES = ["Size – short", "Size – long", "Width issue", "Stitching", "Fabric defect", "Wrong fabric / shade", "Hardware / track", "Blind mechanism", "Lining", "Other"];
+const COST_TYPES = ["Fabric / lining ordered", "Hardware", "Restitching", "Manpower", "Service (roman / roller blind)", "Other"];
+const PAID_FROM = ["Petty cash (staff)", "Company / vendor payment", "Factory (no cash)"];
+const CASE_UI = { open: ["Open", "bg-red-100 text-red-700"], in_progress: ["In progress", "bg-amber-100 text-amber-800"], resolved: ["Resolved", "bg-green-100 text-green-800"], cancelled: ["Cancelled", "bg-gray-100 text-gray-600"] };
+const canEditInstallations = (u) => !!u && (["operations_manager", "founder"].includes(u.role) || (u.extra_roles || []).includes("administrator"));
+
+async function uploadOfficeFiles(files, folder) {
+  const { data } = await supabase.auth.getUser();
+  const uid = data?.user?.id; if (!uid) throw new Error("Not signed in");
+  const out = [];
+  for (const f of files) {
+    const ext = (f.name.split(".").pop() || "jpg").toLowerCase();
+    const path = `${uid}/${folder}/${crypto.randomUUID()}.${ext}`;
+    const { error } = await supabase.storage.from("invoices").upload(path, f, { contentType: f.type || "image/jpeg" });
+    if (error) throw new Error("Upload failed: " + error.message);
+    out.push(path);
+  }
+  return out;
+}
+function PhotoPick({ files, setFiles, label = "📷 Add photos" }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {files.map((f, i) => <span key={i} className="text-xs bg-gray-100 rounded px-2 py-1">{f.name} <button type="button" onClick={() => setFiles(fs => fs.filter((_, j) => j !== i))} className="text-red-600 ml-1">×</button></span>)}
+      <label className="text-xs text-blue-600 cursor-pointer border border-dashed border-gray-300 rounded px-2 py-1">{label}<input type="file" accept="image/*" multiple className="hidden" onChange={e => { setFiles(fs => [...fs, ...Array.from(e.target.files || [])]); e.target.value = ""; }} /></label>
+    </div>
+  );
+}
+
+function InstallationsView({ city, fieldVisits, user, readOnly, onAddVisit, onEditVisit }) {
+  const edit = !readOnly && canEditInstallations(user);
+  const [{ from, to }, setRange] = useState(ftMonthRange());
+  const [who, setWho] = useState("");
+  const [statusF, setStatusF] = useState("all");
+  const [typeF, setTypeF] = useState("");
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [tick, setTick] = useState(0);
+  const reload = () => setTick(t => t + 1);
+  const [outcomeFor, setOutcomeFor] = useState(null);   // { visit, card }
+  const [caseOpen, setCaseOpen] = useState(null);       // alteration case id
+  const [scheduling, setScheduling] = useState(null);   // prefill for AddVisitModal
+
+  // Visits in this city that are field jobs (not plain meetings), in range — plus any visit on an open card
+  const visits = useMemo(() => fieldVisits.filter(v => (v.city || "Mumbai") === city && !v.deleted_at && (v.visit_type || "Meeting") !== "Meeting"), [fieldVisits, city]);
+  const inRange = useMemo(() => visits.filter(v => v.visit_date >= from && v.visit_date <= to), [visits, from, to]);
+  const groupKey = v => v.order_id ? `o${v.order_id}` : v.client_id ? `c${v.client_id}` : `n${(v.customer_name || "").trim().toLowerCase()}|${(v.address || "").trim().toLowerCase()}`;
+  const keysInRange = useMemo(() => new Set(inRange.map(groupKey)), [inRange]);
+  const cardVisits = useMemo(() => visits.filter(v => keysInRange.has(groupKey(v))), [visits, keysInRange]);
+
+  useEffect(() => {
+    let alive = true; setErr(null);
+    (async () => {
+      const ids = cardVisits.map(v => v.id);
+      const orderIds = Array.from(new Set(cardVisits.map(v => v.order_id).filter(Boolean)));
+      if (!ids.length) { setData({ reviews: {}, jobs: {}, bills: {}, orders: {}, cases: [], issues: {}, costs: {}, staff: [] }); return; }
+      const chunk = (arr, n) => arr.length ? Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n)) : [[]];
+      const many = async (fn) => (await Promise.all(chunk(ids, 150).map(fn))).flatMap(r => r.data || []);
+      const [reviews, jobs, bills, orders, cases, staff] = await Promise.all([
+        many(c => supabase.from("installation_reviews").select("*").in("visit_id", c)),
+        many(c => supabase.from("job_completions").select("*").in("job_id", c)),
+        many(c => supabase.from("travel_expenses").select("*").in("visit_id", c)),
+        orderIds.length ? supabase.from("customer_orders").select("id,customer_name,customer_mobile,client_id,customer_building_name,customer_landmark,customer_city,designer_name,windows_count,windows,balance_amount,balance_paid,special_note").in("id", orderIds).then(r => r.data || []) : Promise.resolve([]),
+        orderIds.length ? supabase.from("alteration_cases").select("*").in("order_id", orderIds).order("raised_at").then(r => r.data || []) : Promise.resolve([]),
+        supabase.from("staff").select("id,name,role,city").then(r => r.data || []),
+      ]);
+      const caseIds = cases.map(c => c.id);
+      const [issues, costs] = caseIds.length ? await Promise.all([
+        supabase.from("alteration_issues").select("*").in("case_id", caseIds).order("created_at").then(r => r.data || []),
+        supabase.from("alteration_costs").select("*").in("case_id", caseIds).order("created_at").then(r => r.data || []),
+      ]) : [[], []];
+      if (!alive) return;
+      const idx = (arr, k) => Object.fromEntries(arr.map(x => [x[k], x]));
+      const grp = (arr, k) => arr.reduce((m, x) => ((m[x[k]] = m[x[k]] || []).push(x), m), {});
+      setData({ reviews: idx(reviews, "visit_id"), jobs: idx(jobs, "job_id"), bills: grp(bills, "visit_id"), orders: idx(orders, "id"), cases, issues: grp(issues, "case_id"), costs: grp(costs, "case_id"), staff });
+    })().catch(e => alive && setErr(e.message));
+    return () => { alive = false; };
+  }, [cardVisits, tick]);
+
+  const today = toISO(new Date());
+  const cards = useMemo(() => {
+    if (!data) return [];
+    const map = {};
+    cardVisits.forEach(v => { const k = groupKey(v); (map[k] = map[k] || { key: k, visits: [] }).visits.push(v); });
+    return Object.values(map).map(c => {
+      c.visits.sort((a, b) => a.visit_date.localeCompare(b.visit_date));
+      const first = c.visits[0];
+      c.order = first.order_id ? data.orders[first.order_id] : null;
+      c.customer = c.order?.customer_name || first.customer_name || "—";
+      c.clientId = c.order?.client_id || first.client_id || "";
+      c.address = first.address || (c.order ? [c.order.customer_building_name, c.order.customer_landmark, c.order.customer_city].filter(Boolean).join(", ") : "");
+      c.cases = data.cases.filter(x => first.order_id && x.order_id === first.order_id);
+      const openCase = c.cases.find(x => x.status === "open" || x.status === "in_progress");
+      const installs = c.visits.filter(v => /install/i.test(v.visit_type || ""));
+      const revs = installs.map(v => data.reviews[v.id]).filter(Boolean);
+      const lastRev = revs[revs.length - 1];
+      const unreviewedPast = c.visits.some(v => v.visit_date <= today && !data.reviews[v.id]);
+      c.travel = c.visits.reduce((t, v) => t + (data.bills[v.id] || []).filter(b => b.review_status !== "rejected").reduce((s, b) => s + expTotal(b), 0), 0);
+      c.altCost = c.cases.reduce((t, x) => t + (data.costs[x.id] || []).reduce((s, k) => s + Number(k.amount || 0), 0), 0);
+      c.missingBills = c.visits.filter(v => v.visit_date <= today && !(data.bills[v.id] || []).length && !["cancelled", "rescheduled"].includes(data.reviews[v.id]?.outcome)).length;
+      c.status = openCase ? "alteration" : lastRev?.outcome === "installed" ? "done" : lastRev?.outcome === "partial" ? "partial" : unreviewedPast ? "review" : "pending";
+      c.statusLabel = { alteration: ["Alteration open", "bg-red-100 text-red-700"], done: ["Delivered ✓", "bg-green-100 text-green-800"], partial: ["Partial · final pending", "bg-amber-100 text-amber-800"], review: ["Needs review", "bg-orange-100 text-orange-800"], pending: ["Scheduled", "bg-gray-100 text-gray-600"] }[c.status];
+      c.lastDate = c.visits[c.visits.length - 1].visit_date;
+      return c;
+    }).filter(c => (!who || c.visits.some(v => v.support_name === who)) && (!typeF || c.visits.some(v => v.visit_type === typeF)) && (statusF === "all" || c.status === statusF))
+      .sort((a, b) => ({ review: 0, alteration: 1, partial: 2, pending: 3, done: 4 }[a.status] - { review: 0, alteration: 1, partial: 2, pending: 3, done: 4 }[b.status]) || b.lastDate.localeCompare(a.lastDate));
+  }, [data, cardVisits, who, typeF, statusF]);
+
+  const counts = useMemo(() => { const c = { all: 0, review: 0, alteration: 0, partial: 0, pending: 0, done: 0 }; if (!data) return c; cards.forEach(x => { c.all++; c[x.status]++; }); return c; }, [cards, data]);
+  const inputCls = "bg-white border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500";
+  const supportNames = Array.from(new Set([...supportFor(city), ...visits.map(v => v.support_name).filter(Boolean)])).sort();
+  const visitTypes = VISIT_TYPES.filter(t => t !== "Meeting");
+
+  const exportCustomers = () => downloadCSV(`installations_${city.toLowerCase()}_${from}_to_${to}.csv`, cards, [
+    { label: "Client ID", get: c => c.clientId }, { label: "Customer", get: c => c.customer }, { label: "Address", get: c => c.address }, { label: "Order #", get: c => c.order?.id || "" },
+    { label: "Stylist", get: c => c.order?.designer_name || c.visits[0].stylist || "" }, { label: "Status", get: c => c.statusLabel[0] }, { label: "Visits", get: c => c.visits.length },
+    { label: "First visit", get: c => c.visits[0].visit_date }, { label: "Last visit", get: c => c.lastDate },
+    { label: "Travel (₹)", get: c => c.travel }, { label: "Alteration costs (₹)", get: c => c.altCost }, { label: "Total cost (₹)", get: c => c.travel + c.altCost },
+    { label: "Open issues", get: c => c.cases.filter(x => x.status !== "resolved" && x.status !== "cancelled").flatMap(x => (data.issues[x.id] || []).map(i => `${i.item_label} ${i.layer || ""}: ${i.issue_type}`)).join(" | ") },
+  ]);
+  const exportVisits = () => downloadCSV(`installation_visits_${city.toLowerCase()}_${from}_to_${to}.csv`, cards.flatMap(c => c.visits.map(v => ({ c, v }))), [
+    { label: "Date", get: r => r.v.visit_date }, { label: "Client ID", get: r => r.c.clientId }, { label: "Customer", get: r => r.c.customer }, { label: "Visit type", get: r => r.v.visit_type },
+    { label: "Support staff", get: r => r.v.support_name }, { label: "Stylist", get: r => r.v.stylist }, { label: "Staff report", get: r => data.jobs[r.v.id]?.status || "" },
+    { label: "Outcome", get: r => OUTCOME_UI[data.reviews[r.v.id]?.outcome]?.[0] || "" }, { label: "Marked by", get: r => data.reviews[r.v.id]?.marked_by || "" },
+    { label: "Travel bill (₹)", get: r => (data.bills[r.v.id] || []).filter(b => b.review_status !== "rejected").reduce((s, b) => s + expTotal(b), 0) },
+    { label: "Bill status", get: r => (data.bills[r.v.id] || []).map(b => b.review_status || "pending").join(", ") },
+  ]);
+
+  const chip = (k, l) => <button key={k} onClick={() => setStatusF(k)} className={`px-3 py-1.5 rounded-full text-sm font-medium border ${statusF === k ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"}`}>{l} <span className="opacity-70">({counts[k]})</span></button>;
+
+  return (
+    <section>
+      <div className="flex flex-wrap items-end justify-between gap-3 mb-3">
+        <div>
+          <h2 className="text-lg sm:text-xl font-semibold text-gray-900">Installations / Delivered · {city}</h2>
+          <p className="text-sm text-gray-500">Every scheduled installation, collection and measurement — outcome, alteration issues and the full cost to deliver each customer.{!edit && <span className="ml-1 text-amber-700">View only.</span>}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input type="date" value={from} onChange={e => setRange(r => ({ ...r, from: e.target.value }))} className={inputCls} /><span className="text-gray-400">→</span>
+          <input type="date" value={to} onChange={e => setRange(r => ({ ...r, to: e.target.value }))} className={inputCls} />
+          <select value={who} onChange={e => setWho(e.target.value)} className={inputCls}><option value="">All support staff</option>{supportNames.map(n => <option key={n} value={n}>{n}</option>)}</select>
+          <select value={typeF} onChange={e => setTypeF(e.target.value)} className={inputCls}><option value="">All visit types</option>{visitTypes.map(n => <option key={n} value={n}>{n}</option>)}</select>
+          <button onClick={exportCustomers} disabled={!cards.length} className="px-3 py-2 rounded-md bg-blue-600 text-white text-sm font-semibold disabled:opacity-50">CSV · customers</button>
+          <button onClick={exportVisits} disabled={!cards.length} className="px-3 py-2 rounded-md bg-white border border-gray-300 text-sm font-semibold text-gray-700 disabled:opacity-50">CSV · visits</button>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2 mb-4">{chip("all", "All")}{chip("review", "Needs review")}{chip("alteration", "Alteration open")}{chip("partial", "Partial")}{chip("pending", "Scheduled")}{chip("done", "Delivered")}</div>
+      {err && <div className="p-3 mb-4 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">Could not load: {err}</div>}
+      {data === null && !err && <div className="text-center py-16 text-gray-500">Loading…</div>}
+      {data && cards.length === 0 && <div className="text-center py-16 text-gray-500 bg-white border border-gray-200 rounded-xl">No installations or field visits match these filters.</div>}
+      <div className="space-y-4">
+        {cards.map(c => <InstallationCard key={c.key} c={c} data={data} edit={edit} user={user} city={city}
+          onOutcome={(v) => setOutcomeFor({ visit: v, card: c })} onOpenCase={(id) => setCaseOpen(id)} onSchedule={(prefill) => setScheduling(prefill)} onEditVisit={onEditVisit} />)}
+      </div>
+      {outcomeFor && <OutcomeModal visit={outcomeFor.visit} card={outcomeFor.card} data={data} user={user} city={city}
+        onClose={() => setOutcomeFor(null)} onSaved={() => { setOutcomeFor(null); reload(); }} onSchedule={(p) => { setOutcomeFor(null); setScheduling(p); }} onOpenCase={(id) => { setOutcomeFor(null); setCaseOpen(id); }} />}
+      {caseOpen && <AlterationCaseModal caseId={caseOpen} data={data} edit={edit} user={user} onClose={() => setCaseOpen(null)} onChanged={reload} onSchedule={(p) => { setCaseOpen(null); setScheduling(p); }} />}
+      {scheduling && <AddVisitModal date={scheduling.visit_date || toISO(new Date())} city={city} initial={scheduling} onClose={() => setScheduling(null)}
+        onSave={async (p) => { await onAddVisit(p); setScheduling(null); reload(); }} />}
+    </section>
+  );
+}
+
+function InstallationCard({ c, data, edit, city, onOutcome, onOpenCase, onSchedule, onEditVisit }) {
+  const [open, setOpen] = useState(c.status !== "done");
+  const today = toISO(new Date());
+  const o = c.order;
+  const balance = o ? (o.balance_paid ? 0 : o.balance_amount != null ? Number(o.balance_amount) : null) : null;
+  return (
+    <div className={`bg-white border rounded-xl shadow-card overflow-hidden ${c.status === "alteration" ? "border-red-200" : c.status === "review" ? "border-orange-200" : "border-gray-200"}`}>
+      <button onClick={() => setOpen(x => !x)} className="w-full text-left p-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-gray-900 text-base">{c.customer}</span>
+            {c.clientId && <span className="font-mono text-xs text-blue-700">{c.clientId}</span>}
+            {o && <span className="text-xs text-gray-500">Order #{o.id}</span>}
+            <span className={`text-[11px] font-semibold rounded px-2 py-0.5 ${c.statusLabel[1]}`}>{c.statusLabel[0]}</span>
+            {c.missingBills > 0 && <span className="text-[11px] font-semibold rounded px-2 py-0.5 bg-yellow-100 text-yellow-800">{c.missingBills} visit{c.missingBills === 1 ? "" : "s"} without travel bill</span>}
+          </div>
+          <div className="text-sm text-gray-600 mt-0.5 truncate">{c.address || "—"}{o?.designer_name ? ` · Stylist ${o.designer_name}` : c.visits[0].stylist ? ` · Stylist ${c.visits[0].stylist}` : ""}{o ? ` · ${o.windows_count ?? (o.windows || []).length} windows` : ""}</div>
+        </div>
+        <div className="flex items-center gap-5 text-right shrink-0">
+          <div><div className="text-[10px] uppercase tracking-wider text-gray-500">Visits</div><div className="font-semibold">{c.visits.length}</div></div>
+          <div><div className="text-[10px] uppercase tracking-wider text-gray-500">Travel</div><div className="font-semibold">{inrA(c.travel)}</div></div>
+          <div><div className="text-[10px] uppercase tracking-wider text-gray-500">Alteration</div><div className={`font-semibold ${c.altCost ? "text-red-700" : ""}`}>{inrA(c.altCost)}</div></div>
+          <div><div className="text-[10px] uppercase tracking-wider text-gray-500">Total cost</div><div className="font-bold text-gray-900">{inrA(c.travel + c.altCost)}</div></div>
+          {balance != null && <div><div className="text-[10px] uppercase tracking-wider text-gray-500">Balance due</div><div className={`font-semibold ${balance > 0 ? "text-red-700" : "text-green-700"}`}>{balance > 0 ? inrA(balance) : "Paid"}</div></div>}
+          <span className="text-gray-400">{open ? "▲" : "▼"}</span>
+        </div>
+      </button>
+      {open && (
+        <div className="border-t border-gray-100">
+          {o?.special_note && <div className="mx-4 mt-3 text-sm bg-yellow-50 border border-yellow-200 rounded-lg p-2 text-yellow-900">📝 {o.special_note}</div>}
+          <div className="divide-y divide-gray-100">
+            {c.visits.map(v => {
+              const rev = data.reviews[v.id]; const job = data.jobs[v.id]; const bills = (data.bills[v.id] || []);
+              const ou = rev && OUTCOME_UI[rev.outcome]; const past = v.visit_date <= today; const isInstall = /install/i.test(v.visit_type || "");
+              const planned = Array.isArray(v.install_items) ? v.install_items.length : 0;
+              return (
+                <div key={v.id} className="px-4 py-3 grid gap-3 lg:grid-cols-12 items-start">
+                  <div className="lg:col-span-3">
+                    <div className="text-sm font-semibold text-gray-900">{fmtD(v.visit_date)} · {v.visit_type}</div>
+                    <div className="text-xs text-gray-600">{v.timing || "time TBD"} · {v.support_name || <span className="text-amber-700">no support assigned</span>}{planned ? ` · ${planned} curtains planned` : ""}</div>
+                    {v.visit_status && <div className="text-[11px] text-gray-500">Scheduling status: {v.visit_status}</div>}
+                    {edit && <button onClick={() => onEditVisit(v)} className="text-xs text-blue-600 hover:underline">Edit visit</button>}
+                  </div>
+                  <div className="lg:col-span-3 text-sm">
+                    <div className="text-[10px] uppercase tracking-wider text-gray-500">Staff report</div>
+                    {job ? <>
+                      <span className={`text-[11px] font-semibold rounded px-1.5 py-0.5 ${job.status === "completed" ? "bg-green-100 text-green-800" : job.status === "unfinished" ? "bg-amber-100 text-amber-800" : "bg-blue-100 text-blue-800"}`}>{job.status === "completed" ? "Completed" : job.status === "unfinished" ? "Unfinished" : "In progress"}</span>
+                      <span className="text-xs text-gray-600 ml-2">{Object.values(job.checklist || {}).filter(Boolean).length} ticked{job.details?.feedback ? ` · feedback ${job.details.feedback}` : ""}</span>
+                      {job.unfinished_reason && <div className="text-xs text-amber-800 mt-0.5">{job.unfinished_reason}</div>}
+                      {job.note && <div className="text-xs text-gray-600 mt-0.5">📝 {job.note}</div>}
+                      {(job.photos || []).length > 0 && <div className="mt-1"><Thumbs paths={job.photos} /></div>}
+                    </> : <div className="text-xs text-gray-400">{past ? "Nothing submitted from the staff portal" : "Not yet"}</div>}
+                  </div>
+                  <div className="lg:col-span-3 text-sm">
+                    <div className="text-[10px] uppercase tracking-wider text-gray-500">Travel bill (staff, petty cash)</div>
+                    {bills.length ? bills.map(b => (
+                      <div key={b.id} className="flex flex-wrap items-center gap-2 mt-0.5">
+                        <span className="font-semibold">{inrA(expTotal(b))}</span><span className="text-xs text-gray-600">{b.staff_name} · {b.payment_method}</span>
+                        <span className={`text-[10px] font-semibold rounded px-1.5 py-0.5 ${(REVIEW_UI[b.review_status || "pending"] || REVIEW_UI.pending)[1]}`}>{(REVIEW_UI[b.review_status || "pending"] || REVIEW_UI.pending)[0]}</span>
+                        <Thumbs paths={[...expPaths(b, "to"), ...expPaths(b, "back")]} />
+                      </div>
+                    )) : <div className={`text-xs ${past && !["cancelled", "rescheduled"].includes(rev?.outcome) ? "text-yellow-700 font-medium" : "text-gray-400"}`}>{past ? "No bill attached yet" : "—"}</div>}
+                  </div>
+                  <div className="lg:col-span-3">
+                    <div className="text-[10px] uppercase tracking-wider text-gray-500">Outcome (operations)</div>
+                    {ou ? <div className="mt-0.5"><span className={`text-xs font-semibold rounded border px-2 py-0.5 ${ou[1]}`}>{ou[0]}</span><div className="text-[11px] text-gray-500 mt-0.5">{rev.marked_by} · {new Date(rev.marked_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}{rev.note ? ` — ${rev.note}` : ""}</div>
+                      {rev.outcome === "partial" && (rev.remaining_items || []).length > 0 && <div className="text-xs text-amber-800 mt-0.5">Pending: {rev.remaining_items.map(i => `${i.label} ${i.layer || ""}`.trim()).join(", ")}</div>}</div>
+                      : <div className="text-xs text-gray-400 mt-0.5">{past ? <span className="text-orange-700 font-medium">Not marked yet</span> : "Visit not done yet"}</div>}
+                    {edit && <button onClick={() => onOutcome(v)} className={`mt-1.5 px-3 py-1.5 rounded-md text-xs font-semibold ${rev ? "bg-white border border-gray-300 text-gray-700" : isInstall ? "bg-gray-900 text-white" : "bg-blue-600 text-white"}`}>{rev ? "Change outcome" : "Mark outcome"}</button>}
+                  </div>
+                </div>);
+            })}
+          </div>
+          {c.cases.length > 0 && (
+            <div className="border-t border-gray-100 bg-red-50/40 px-4 py-3">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Alteration cases</div>
+              <div className="space-y-2">
+                {c.cases.map(x => { const iss = data.issues[x.id] || []; const cost = (data.costs[x.id] || []).reduce((s, k) => s + Number(k.amount || 0), 0); const cu = CASE_UI[x.status] || CASE_UI.open;
+                  return (
+                    <div key={x.id} className="flex flex-wrap items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
+                      <div className="text-sm"><span className="font-semibold">Case #{x.case_no}</span> <span className={`text-[11px] font-semibold rounded px-1.5 py-0.5 ml-1 ${cu[1]}`}>{cu[0]}</span>
+                        <span className="text-gray-600 ml-2">{iss.length} issue{iss.length === 1 ? "" : "s"}: {iss.slice(0, 3).map(i => `${i.item_label} ${i.layer || ""} – ${i.issue_type}`).join("; ")}{iss.length > 3 ? "…" : ""}</span></div>
+                      <div className="flex items-center gap-3"><span className="text-sm font-semibold text-red-700">{inrA(cost)}</span><button onClick={() => onOpenCase(x.id)} className="px-3 py-1.5 rounded-md bg-white border border-gray-300 text-xs font-semibold text-gray-700">{edit ? "Open case" : "View"}</button></div>
+                    </div>);
+                })}
+              </div>
+            </div>
+          )}
+          {edit && (
+            <div className="border-t border-gray-100 px-4 py-2 flex flex-wrap gap-2 bg-gray-50">
+              <button onClick={() => onSchedule({ visit_date: toISO(new Date()), customer_name: c.customer, address: c.address, stylist: o?.designer_name || c.visits[0].stylist || "", support_name: c.visits[c.visits.length - 1].support_name || "", visit_type: "Installation", order_id: o?.id || null, client_id: c.clientId, mobile: o?.customer_mobile || c.visits[0].mobile || "" })} className="text-xs font-semibold text-blue-600 hover:underline">+ Schedule another visit for this customer</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OutcomeModal({ visit, card, data, user, city, onClose, onSaved, onSchedule, onOpenCase }) {
+  const rev = data.reviews[visit.id];
+  const isInstall = /install/i.test(visit.visit_type || "");
+  const planned = (Array.isArray(visit.install_items) && visit.install_items.length) ? visit.install_items : orderInstallItems(card.order);
+  const [outcome, setOutcome] = useState(rev?.outcome || null);
+  const [done, setDone] = useState(() => { const m = {}; (rev?.installed_items || []).forEach(i => m[i.key] = true); return m; });
+  const [note, setNote] = useState(rev?.note || "");
+  const [issues, setIssues] = useState([{ item_key: "", issue_type: ISSUE_TYPES[0], description: "", files: [] }]);
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
+  const who = user?.full_name || user?.email || "Operations";
+  const remaining = planned.filter(i => !done[i.key]);
+  const nextSupport = visit.support_name || "";
+  const prefill = (type, items) => ({ visit_date: toISO(new Date()), customer_name: card.customer, address: card.address, stylist: card.order?.designer_name || visit.stylist || "", support_name: nextSupport, visit_type: type, order_id: card.order?.id || visit.order_id || null, client_id: card.clientId, mobile: card.order?.customer_mobile || visit.mobile || "", install_items: items || null });
+
+  const save = async (then) => {
+    if (!outcome) { setErr("Choose what happened at this visit."); return; }
+    if (outcome === "partial" && isInstall && planned.length && Object.values(done).filter(Boolean).length === 0) { setErr("Tick at least one curtain that was installed."); return; }
+    if (outcome === "alteration" && issues.some(i => !i.item_key && !i.description.trim())) { setErr("Each issue needs a curtain or a description."); return; }
+    setBusy(true); setErr(null);
+    try {
+      const row = { visit_id: visit.id, order_id: card.order?.id || visit.order_id || null, client_id: card.clientId || null, outcome, note: note || null, marked_by: who, marked_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        installed_items: outcome === "partial" ? planned.filter(i => done[i.key]) : outcome === "installed" ? planned : null, remaining_items: outcome === "partial" ? remaining : null };
+      const { error } = await supabase.from("installation_reviews").upsert(row, { onConflict: "visit_id" });
+      if (error) throw new Error(error.message);
+      const vs = { installed: "Done", partial: "Done", alteration: "Done", cancelled: "Cancel", rescheduled: "Rescheduled" }[outcome];
+      await supabase.from("field_visits").update({ visit_status: vs, status: outcome === "installed" ? "Completed" : outcome === "partial" ? "Partial" : outcome === "alteration" ? "Alteration" : vs }).eq("id", visit.id);
+      let caseId = null;
+      if (outcome === "alteration") {
+        const o = card.order;
+        const { data: cs, error: ce } = await supabase.from("alteration_cases").insert({ order_id: o?.id || visit.order_id || null, client_id: card.clientId || null, customer_name: card.customer, customer_mobile: o?.customer_mobile || visit.mobile || null, address: card.address || null, city, raised_from_visit_id: visit.id, raised_by: who, note: note || null }).select("id").single();
+        if (ce) throw new Error(ce.message);
+        caseId = cs.id;
+        for (const it of issues) {
+          const item = planned.find(p => p.key === it.item_key);
+          const photos = it.files.length ? await uploadOfficeFiles(it.files, `alterations/${caseId}`) : [];
+          const { error: ie } = await supabase.from("alteration_issues").insert({ case_id: caseId, item_key: it.item_key || null, item_label: item ? item.label : (it.item_key ? it.item_key : "General"), layer: item?.layer || null, issue_type: it.issue_type, description: it.description || null, photos });
+          if (ie) throw new Error(ie.message);
+        }
+      }
+      then(caseId);
+    } catch (e) { setErr(e.message); setBusy(false); }
+  };
+  const Big = ({ k, title, sub, cls }) => <button type="button" onClick={() => setOutcome(k)} className={`text-left rounded-xl border-2 p-3 ${outcome === k ? cls : "border-gray-200 bg-white hover:bg-gray-50"}`}><div className="font-semibold text-gray-900">{title}</div><div className="text-xs text-gray-600 mt-0.5">{sub}</div></button>;
+  const inp = "mt-1 w-full bg-white border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500";
+  return (
+    <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-end sm:items-center justify-center sm:p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl shadow-card" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+          <div><div className="font-semibold">Outcome · {visit.visit_type} · {fmtD(visit.visit_date)}</div><div className="text-xs text-gray-500">{card.customer} {card.clientId && <span className="font-mono text-blue-700">{card.clientId}</span>} · {visit.support_name || "no support"}</div></div>
+          <button onClick={onClose} className="w-9 h-9 rounded-full hover:bg-gray-100 text-2xl text-gray-500">×</button>
+        </div>
+        {err && <div className="mx-4 mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">{err}</div>}
+        <div className="p-4 space-y-4">
+          <div className="grid sm:grid-cols-3 gap-2">
+            {isInstall ? <>
+              <Big k="installed" title="✓ Installed successfully" sub="All planned curtains are up. Only this visit's travel is the cost." cls="border-green-500 bg-green-50" />
+              <Big k="partial" title="◐ Partially installed" sub="Some curtains pending — schedule the final installation." cls="border-amber-500 bg-amber-50" />
+              <Big k="alteration" title="⚠ Issue / alteration" sub="Something needs fixing — raise an alteration case for the factory." cls="border-red-500 bg-red-50" />
+            </> : <>
+              <Big k="installed" title="✓ Done" sub={`${visit.visit_type} completed as planned.`} cls="border-green-500 bg-green-50" />
+              <Big k="alteration" title="⚠ Issue found" sub="Raise an alteration case for the factory." cls="border-red-500 bg-red-50" />
+              <Big k="partial" title="◐ Partly done" sub="Needs another visit." cls="border-amber-500 bg-amber-50" />
+            </>}
+          </div>
+          <div className="flex gap-3 text-sm">
+            <label className="inline-flex items-center gap-1.5"><input type="radio" checked={outcome === "cancelled"} onChange={() => setOutcome("cancelled")} /> Cancelled for the day</label>
+            <label className="inline-flex items-center gap-1.5"><input type="radio" checked={outcome === "rescheduled"} onChange={() => setOutcome("rescheduled")} /> Rescheduled</label>
+          </div>
+
+          {outcome === "partial" && isInstall && planned.length > 0 && (
+            <div className="rounded-xl border border-amber-200 p-3">
+              <div className="flex items-baseline justify-between"><div className="text-xs uppercase tracking-wider text-gray-600 font-semibold">Tick what was installed</div><div className="text-xs text-gray-600">{Object.values(done).filter(Boolean).length}/{planned.length} · {remaining.length} pending</div></div>
+              <div className="flex flex-wrap gap-2 mt-2">{planned.map(i => (
+                <label key={i.key} className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm cursor-pointer ${done[i.key] ? "bg-green-50 border-green-400 text-green-800" : "bg-white border-gray-300"}`}><input type="checkbox" checked={!!done[i.key]} onChange={e => setDone(d => ({ ...d, [i.key]: e.target.checked }))} className="accent-green-600" />{i.label} <b>{i.layer}</b></label>))}</div>
+              <div className="flex gap-2 mt-2 text-xs"><button type="button" className="text-blue-600" onClick={() => setDone(Object.fromEntries(planned.map(i => [i.key, true])))}>All</button><button type="button" className="text-gray-500" onClick={() => setDone({})}>None</button></div>
+            </div>
+          )}
+
+          {outcome === "alteration" && (
+            <div className="rounded-xl border border-red-200 p-3 space-y-3">
+              <div className="text-xs uppercase tracking-wider text-gray-600 font-semibold">What went wrong</div>
+              {issues.map((it, idx) => (
+                <div key={idx} className="rounded-lg bg-red-50/50 border border-red-100 p-3 space-y-2">
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    <label className="block"><span className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Room / window / curtain</span>
+                      <select value={it.item_key} onChange={e => setIssues(a => a.map((x, j) => j === idx ? { ...x, item_key: e.target.value } : x))} className={inp}>
+                        <option value="">— general / not a specific curtain —</option>
+                        {planned.map(p => <option key={p.key} value={p.key}>{p.label} · {p.layer}</option>)}
+                      </select></label>
+                    <label className="block"><span className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Issue type</span>
+                      <select value={it.issue_type} onChange={e => setIssues(a => a.map((x, j) => j === idx ? { ...x, issue_type: e.target.value } : x))} className={inp}>{ISSUE_TYPES.map(t => <option key={t}>{t}</option>)}</select></label>
+                  </div>
+                  <label className="block"><span className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Describe the issue</span>
+                    <textarea rows="2" value={it.description} onChange={e => setIssues(a => a.map((x, j) => j === idx ? { ...x, description: e.target.value } : x))} className={inp} placeholder="e.g. Main curtain 2 inch short on the left, lining showing at bottom" /></label>
+                  <div className="flex items-center justify-between gap-2"><PhotoPick files={it.files} setFiles={(fn) => setIssues(a => a.map((x, j) => j === idx ? { ...x, files: typeof fn === "function" ? fn(x.files) : fn } : x))} />
+                    {issues.length > 1 && <button type="button" onClick={() => setIssues(a => a.filter((_, j) => j !== idx))} className="text-xs text-red-600">Remove</button>}</div>
+                </div>
+              ))}
+              <button type="button" onClick={() => setIssues(a => [...a, { item_key: "", issue_type: ISSUE_TYPES[0], description: "", files: [] }])} className="text-sm text-blue-600 font-medium">+ Add another issue</button>
+              <div className="text-xs text-gray-600">This creates an alteration case that the factory / production team sees in the ERP. You can add costs (fabric, restitching, manpower…) on the case afterwards.</div>
+            </div>
+          )}
+
+          <label className="block"><span className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Note (optional)</span><input value={note} onChange={e => setNote(e.target.value)} className={inp} placeholder="Anything the office should know" /></label>
+        </div>
+        <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 flex flex-wrap gap-2 justify-end">
+          <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-lg border border-gray-300 text-sm font-medium">Cancel</button>
+          {outcome === "partial" && <button disabled={busy} onClick={() => save(() => onSchedule(prefill("Installation", remaining)))} className="px-4 py-2.5 rounded-lg bg-amber-500 text-white text-sm font-semibold disabled:opacity-60">Save & schedule final installation →</button>}
+          {outcome === "alteration" && <button disabled={busy} onClick={() => save((id) => onOpenCase(id))} className="px-4 py-2.5 rounded-lg bg-red-600 text-white text-sm font-semibold disabled:opacity-60">Save & open case →</button>}
+          {outcome === "rescheduled" && <button disabled={busy} onClick={() => save(() => onSchedule(prefill(visit.visit_type, visit.install_items)))} className="px-4 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-semibold disabled:opacity-60">Save & pick new date →</button>}
+          <button disabled={busy} onClick={() => save(() => onSaved())} className="px-5 py-2.5 rounded-lg bg-gray-900 text-white text-sm font-semibold disabled:opacity-60">{busy ? "Saving…" : "Save"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AlterationCaseModal({ caseId, data, edit, user, onClose, onChanged, onSchedule }) {
+  const [cs, setCs] = useState(null); const [issues, setIssues] = useState([]); const [costs, setCosts] = useState([]);
+  const [order, setOrder] = useState(null);
+  const [cost, setCost] = useState({ cost_type: COST_TYPES[0], amount: "", metres: "", paid_from: PAID_FROM[0], vendor: "", note: "", files: [] });
+  const [newIssue, setNewIssue] = useState(null);
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
+  const who = user?.full_name || user?.email || "Operations";
+  const load = async () => {
+    const [c, i, k] = await Promise.all([
+      supabase.from("alteration_cases").select("*").eq("id", caseId).single(),
+      supabase.from("alteration_issues").select("*").eq("case_id", caseId).order("created_at"),
+      supabase.from("alteration_costs").select("*").eq("case_id", caseId).order("created_at"),
+    ]);
+    setCs(c.data); setIssues(i.data || []); setCosts(k.data || []);
+    if (c.data?.order_id) supabase.from("customer_orders").select("id,windows,customer_mobile,designer_name").eq("id", c.data.order_id).single().then(r => setOrder(r.data));
+  };
+  useEffect(() => { load(); }, [caseId]);
+  const planned = orderInstallItems(order);
+  const total = costs.reduce((s, k) => s + Number(k.amount || 0), 0);
+  const inp = "mt-1 w-full bg-white border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500";
+  const addCost = async () => {
+    if (!(Number(cost.amount) > 0)) { setErr("Enter the amount."); return; }
+    setBusy(true); setErr(null);
+    try {
+      const bill_paths = cost.files.length ? await uploadOfficeFiles(cost.files, `alterations/${caseId}`) : [];
+      const { error } = await supabase.from("alteration_costs").insert({ case_id: caseId, cost_type: cost.cost_type, amount: Number(cost.amount), metres: cost.metres ? Number(cost.metres) : null, paid_from: cost.paid_from, vendor: cost.vendor || null, note: cost.note || null, bill_paths, created_by: who });
+      if (error) throw new Error(error.message);
+      setCost({ cost_type: COST_TYPES[0], amount: "", metres: "", paid_from: PAID_FROM[0], vendor: "", note: "", files: [] });
+      await load(); onChanged();
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const delCost = async (k) => { if (!confirm(`Delete ${k.cost_type} ${inrA(k.amount)}?`)) return; await supabase.from("alteration_costs").delete().eq("id", k.id); await load(); onChanged(); };
+  const setStatus = async (status) => {
+    const patch = { status, updated_at: new Date().toISOString(), ...(status === "resolved" ? { resolved_by: who, resolved_at: new Date().toISOString() } : {}) };
+    const { error } = await supabase.from("alteration_cases").update(patch).eq("id", caseId);
+    if (error) { setErr(error.message); return; }
+    await load(); onChanged();
+  };
+  const toggleIssue = async (i) => { await supabase.from("alteration_issues").update({ status: i.status === "resolved" ? "open" : "resolved" }).eq("id", i.id); await load(); };
+  const saveNewIssue = async () => {
+    const item = planned.find(p => p.key === newIssue.item_key);
+    setBusy(true);
+    try {
+      const photos = newIssue.files.length ? await uploadOfficeFiles(newIssue.files, `alterations/${caseId}`) : [];
+      const { error } = await supabase.from("alteration_issues").insert({ case_id: caseId, item_key: newIssue.item_key || null, item_label: item ? item.label : "General", layer: item?.layer || null, issue_type: newIssue.issue_type, description: newIssue.description || null, photos });
+      if (error) throw new Error(error.message);
+      setNewIssue(null); await load(); onChanged();
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  if (!cs) return <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center" onClick={onClose}><div className="bg-white rounded-xl p-6 text-gray-600">Loading…</div></div>;
+  const cu = CASE_UI[cs.status] || CASE_UI.open;
+  const prefill = (type) => ({ visit_date: toISO(new Date()), customer_name: cs.customer_name, address: cs.address || "", stylist: order?.designer_name || "", support_name: "", visit_type: type, order_id: cs.order_id, client_id: cs.client_id || "", mobile: cs.customer_mobile || "", install_items: type === "Installation" ? planned.filter(p => issues.some(i => i.item_key === p.key)) : null });
+  return (
+    <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-end sm:items-center justify-center sm:p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl shadow-card" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between gap-2">
+          <div><div className="font-semibold">Alteration case #{cs.case_no} <span className={`text-[11px] font-semibold rounded px-1.5 py-0.5 ml-1 ${cu[1]}`}>{cu[0]}</span></div>
+            <div className="text-xs text-gray-500">{cs.customer_name} {cs.client_id && <span className="font-mono text-blue-700">{cs.client_id}</span>} · Order #{cs.order_id || "—"} · raised by {cs.raised_by} on {new Date(cs.raised_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</div></div>
+          <button onClick={onClose} className="w-9 h-9 rounded-full hover:bg-gray-100 text-2xl text-gray-500">×</button>
+        </div>
+        {err && <div className="mx-4 mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">{err}</div>}
+        <div className="p-4 space-y-5">
+          <section>
+            <div className="flex items-center justify-between"><div className="text-xs uppercase tracking-wider text-gray-600 font-semibold">Issues ({issues.length})</div>{edit && !newIssue && <button onClick={() => setNewIssue({ item_key: "", issue_type: ISSUE_TYPES[0], description: "", files: [] })} className="text-sm text-blue-600 font-medium">+ Add issue</button>}</div>
+            <div className="mt-2 space-y-2">
+              {issues.map(i => (
+                <div key={i.id} className={`flex items-start gap-3 rounded-lg border p-3 ${i.status === "resolved" ? "bg-green-50/50 border-green-200" : "bg-white border-gray-200"}`}>
+                  {edit && <input type="checkbox" checked={i.status === "resolved"} onChange={() => toggleIssue(i)} className="mt-1 w-5 h-5 accent-green-600" title="Mark resolved" />}
+                  <div className="min-w-0 flex-1">
+                    <div className={`text-sm font-semibold ${i.status === "resolved" ? "line-through text-gray-400" : "text-gray-900"}`}>{i.item_label}{i.layer ? ` · ${i.layer}` : ""} <span className="text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5 ml-1">{i.issue_type}</span></div>
+                    {i.description && <div className="text-sm text-gray-700 mt-0.5">{i.description}</div>}
+                    {(i.photos || []).length > 0 && <div className="mt-1"><Thumbs paths={i.photos} /></div>}
+                  </div>
+                </div>))}
+              {newIssue && (
+                <div className="rounded-lg border border-red-200 bg-red-50/40 p-3 space-y-2">
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    <select value={newIssue.item_key} onChange={e => setNewIssue(x => ({ ...x, item_key: e.target.value }))} className={inp}><option value="">— general —</option>{planned.map(p => <option key={p.key} value={p.key}>{p.label} · {p.layer}</option>)}</select>
+                    <select value={newIssue.issue_type} onChange={e => setNewIssue(x => ({ ...x, issue_type: e.target.value }))} className={inp}>{ISSUE_TYPES.map(t => <option key={t}>{t}</option>)}</select>
+                  </div>
+                  <textarea rows="2" value={newIssue.description} onChange={e => setNewIssue(x => ({ ...x, description: e.target.value }))} className={inp} placeholder="Describe the issue" />
+                  <div className="flex items-center justify-between"><PhotoPick files={newIssue.files} setFiles={(fn) => setNewIssue(x => ({ ...x, files: typeof fn === "function" ? fn(x.files) : fn }))} />
+                    <div className="flex gap-2"><button onClick={() => setNewIssue(null)} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md">Cancel</button><button disabled={busy} onClick={saveNewIssue} className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-md font-semibold">Add</button></div></div>
+                </div>)}
+            </div>
+          </section>
+
+          <section>
+            <div className="flex items-center justify-between"><div className="text-xs uppercase tracking-wider text-gray-600 font-semibold">Alteration costs</div><div className="text-sm font-bold text-red-700">{inrA(total)}</div></div>
+            <div className="text-xs text-gray-500 mb-2">Travel for revisits is not entered here — it comes automatically from the staff's travel bills on each visit.</div>
+            {costs.length > 0 && (
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <table className="w-full text-sm">
+                  <thead><tr className="bg-gray-50 text-[11px] uppercase tracking-wider text-gray-600"><th className="px-3 py-2 text-left">Type</th><th className="px-3 py-2 text-left">Amount</th><th className="px-3 py-2 text-left">Paid from</th><th className="px-3 py-2 text-left">Vendor / note</th><th className="px-3 py-2 text-left">Bill</th><th></th></tr></thead>
+                  <tbody>{costs.map(k => (
+                    <tr key={k.id} className="border-t border-gray-100"><td className="px-3 py-2">{k.cost_type}{k.metres ? <span className="text-xs text-gray-500"> · {k.metres} m</span> : ""}</td><td className="px-3 py-2 font-semibold">{inrA(k.amount)}</td><td className="px-3 py-2 text-xs">{k.paid_from}</td>
+                      <td className="px-3 py-2 text-xs text-gray-600">{[k.vendor, k.note].filter(Boolean).join(" — ")}<div className="text-[10px] text-gray-400">{k.created_by} · {new Date(k.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</div></td>
+                      <td className="px-3 py-2"><Thumbs paths={k.bill_paths || []} /></td><td className="px-3 py-2">{edit && <button onClick={() => delCost(k)} className="text-xs text-red-600">Delete</button>}</td></tr>))}</tbody>
+                </table>
+              </div>)}
+            {edit && cs.status !== "resolved" && cs.status !== "cancelled" && (
+              <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div className="text-xs font-semibold text-gray-700 mb-2">Add a cost</div>
+                <div className="grid sm:grid-cols-4 gap-2">
+                  <select value={cost.cost_type} onChange={e => setCost(c => ({ ...c, cost_type: e.target.value }))} className={inp + " mt-0"}>{COST_TYPES.map(t => <option key={t}>{t}</option>)}</select>
+                  <input type="number" min="0" placeholder="Amount ₹" value={cost.amount} onChange={e => setCost(c => ({ ...c, amount: e.target.value }))} className={inp + " mt-0"} />
+                  {cost.cost_type.startsWith("Fabric") && <input type="number" min="0" step="0.1" placeholder="Metres" value={cost.metres} onChange={e => setCost(c => ({ ...c, metres: e.target.value }))} className={inp + " mt-0"} />}
+                  <select value={cost.paid_from} onChange={e => setCost(c => ({ ...c, paid_from: e.target.value }))} className={inp + " mt-0"}>{PAID_FROM.map(t => <option key={t}>{t}</option>)}</select>
+                  <input placeholder="Vendor / paid to" value={cost.vendor} onChange={e => setCost(c => ({ ...c, vendor: e.target.value }))} className={inp + " mt-0"} />
+                  <input placeholder="Note" value={cost.note} onChange={e => setCost(c => ({ ...c, note: e.target.value }))} className={inp + " mt-0 sm:col-span-2"} />
+                  <div className="sm:col-span-4 flex items-center justify-between gap-2"><PhotoPick files={cost.files} setFiles={(fn) => setCost(c => ({ ...c, files: typeof fn === "function" ? fn(c.files) : fn }))} label="📎 Attach bill" /><button disabled={busy} onClick={addCost} className="px-4 py-2 rounded-md bg-gray-900 text-white text-sm font-semibold disabled:opacity-60">{busy ? "Saving…" : "Add cost"}</button></div>
+                </div>
+              </div>)}
+          </section>
+
+          {edit && (
+            <section className="rounded-xl border border-gray-200 p-3">
+              <div className="text-xs uppercase tracking-wider text-gray-600 font-semibold mb-2">Next steps</div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => onSchedule(prefill("Collection for alteration"))} className="px-3 py-2 rounded-md bg-white border border-gray-300 text-sm font-semibold text-gray-700">Schedule collection for alteration</button>
+                <button onClick={() => onSchedule(prefill("Installation"))} className="px-3 py-2 rounded-md bg-white border border-gray-300 text-sm font-semibold text-gray-700">Schedule re-installation</button>
+                {cs.status === "open" && <button onClick={() => setStatus("in_progress")} className="px-3 py-2 rounded-md bg-amber-500 text-white text-sm font-semibold">Mark in progress (with factory)</button>}
+                {cs.status !== "resolved" && <button onClick={() => { if (confirm("Mark this alteration as resolved? The customer card will show Delivered once the final installation is marked.")) setStatus("resolved"); }} className="px-3 py-2 rounded-md bg-green-600 text-white text-sm font-semibold">Mark resolved ✓</button>}
+                {cs.status === "resolved" && <button onClick={() => setStatus("open")} className="px-3 py-2 rounded-md bg-white border border-gray-300 text-sm">Reopen</button>}
+              </div>
+            </section>)}
+        </div>
+      </div>
     </div>
   );
 }
@@ -2585,7 +3124,7 @@ function App() {
   useEffect(() => {
     if (!session) { setProfile(undefined); return; }
     const email = (session.user.email || "").toLowerCase();
-    supabase.from("users").select("full_name,email,role,is_active").ilike("email", email).maybeSingle()
+    supabase.from("users").select("full_name,email,role,is_active,extra_roles").ilike("email", email).maybeSingle()
       .then(({ data }) => setProfile(data && data.is_active ? { ...data, email } : null));
   }, [session]);
 
