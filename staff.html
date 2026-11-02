@@ -31,6 +31,22 @@ const SUPABASE_URL = "https://pncdmkqhfclymmyldmas.supabase.co";
 const SUPABASE_KEY = "sb_publishable_Mm7ImJtTtEQIAR9KK1DLzw_QGkhptKA";
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const EMAIL_DOMAIN = "@staff.dmoksha";
+// Shrink photos on the phone before upload: longest side 1600px, JPEG ~72% quality.
+// A 4–6 MB camera photo becomes ~200–400 KB; screenshots stay readable. Falls back to the original if the browser can't decode it.
+async function compressImage(file, maxSide = 1600, quality = 0.72) {
+  try {
+    if (!file || !file.type || !file.type.startsWith("image/") || file.type === "image/gif") return file;
+    const bmp = await new Promise((res, rej) => { const img = new Image(); const u = URL.createObjectURL(file); img.onload = () => { URL.revokeObjectURL(u); res(img); }; img.onerror = e => { URL.revokeObjectURL(u); rej(e); }; img.src = u; });
+    const scale = Math.min(1, maxSide / Math.max(bmp.naturalWidth, bmp.naturalHeight));
+    const w = Math.round(bmp.naturalWidth * scale), h = Math.round(bmp.naturalHeight * scale);
+    const canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h); ctx.drawImage(bmp, 0, 0, w, h);
+    const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", quality));
+    return blob && blob.size < file.size ? blob : file;
+  } catch { return file; }
+}
+const uploadExt = (orig, blob) => blob !== orig ? "jpg" : ((orig.name || "").split(".").pop() || "jpg").toLowerCase();
+
 
 const pad = n => String(n).padStart(2, "0");
 const toISO = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
@@ -310,9 +326,9 @@ function JobSheet({ staff, date, row, existing, onClose, onSaved }) {
     if (!file) return;
     setToolBusy(t.key); setErr(null);
     try {
-      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const blob = await compressImage(file); const ext = uploadExt(file, blob);
       const path = `${staff.auth_user_id}/jobs/${row.id}/tools/${t.key}_${crypto.randomUUID()}.${ext}`;
-      const { error } = await supabase.storage.from("invoices").upload(path, file, { contentType: file.type || "image/jpeg" });
+      const { error } = await supabase.storage.from("invoices").upload(path, blob, { contentType: blob.type || file.type || "image/jpeg" });
       if (error) throw new Error("Photo upload failed: " + error.message);
       setDetails(d => ({ ...d, tool_photos: { ...(d.tool_photos || {}), [t.key]: [path] } }));
       setChecks(c => ({ ...c, [t.key]: true }));
@@ -344,9 +360,9 @@ function JobSheet({ staff, date, row, existing, onClose, onSaved }) {
   const uploadAll = async () => {
     const paths = [];
     for (const f of files) {
-      const ext = (f.name.split(".").pop() || "jpg").toLowerCase();
+      const blob = await compressImage(f); const ext = uploadExt(f, blob);
       const path = `${staff.auth_user_id}/jobs/${row.id}/${crypto.randomUUID()}.${ext}`;
-      const { error } = await supabase.storage.from("invoices").upload(path, f, { contentType: f.type || "image/jpeg" });
+      const { error } = await supabase.storage.from("invoices").upload(path, blob, { contentType: blob.type || f.type || "image/jpeg" });
       if (error) throw new Error("Photo upload failed: " + error.message);
       paths.push(path);
     }
@@ -573,9 +589,9 @@ function ExpenseForm({ staff, date, row, onClose, onSaved }) {
   const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
 
   const upload = async (file, leg) => {
-    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+    const blob = await compressImage(file); const ext = uploadExt(file, blob);
     const path = `${staff.auth_user_id}/${date}/${crypto.randomUUID()}_${leg}.${ext}`;
-    const { error } = await supabase.storage.from("invoices").upload(path, file, { contentType: file.type || "image/jpeg", upsert: false });
+    const { error } = await supabase.storage.from("invoices").upload(path, blob, { contentType: blob.type || file.type || "image/jpeg", upsert: false });
     if (error) throw new Error("Upload failed: " + error.message);
     return path;
   };

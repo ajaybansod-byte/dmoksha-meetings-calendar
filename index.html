@@ -2323,7 +2323,23 @@ function MarkPaidModal({ user, paying, onClose, onDone }) {
 // =========================================================
 //     Installations / Delivered (operations: outcomes, alterations, costs)
 // =========================================================
+// Shrink photos on the phone before upload: longest side 1600px, JPEG ~72% quality.
+// A 4–6 MB camera photo becomes ~200–400 KB; screenshots stay readable. Falls back to the original if the browser can't decode it.
+async function compressImage(file, maxSide = 1600, quality = 0.72) {
+  try {
+    if (!file || !file.type || !file.type.startsWith("image/") || file.type === "image/gif") return file;
+    const bmp = await new Promise((res, rej) => { const img = new Image(); const u = URL.createObjectURL(file); img.onload = () => { URL.revokeObjectURL(u); res(img); }; img.onerror = e => { URL.revokeObjectURL(u); rej(e); }; img.src = u; });
+    const scale = Math.min(1, maxSide / Math.max(bmp.naturalWidth, bmp.naturalHeight));
+    const w = Math.round(bmp.naturalWidth * scale), h = Math.round(bmp.naturalHeight * scale);
+    const canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h); ctx.drawImage(bmp, 0, 0, w, h);
+    const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", quality));
+    return blob && blob.size < file.size ? blob : file;
+  } catch { return file; }
+}
+const uploadExt = (orig, blob) => blob !== orig ? "jpg" : ((orig.name || "").split(".").pop() || "jpg").toLowerCase();
 const OUTCOME_UI = {
+
   installed:   ["Installed",            "bg-green-100 text-green-800 border-green-300"],
   partial:     ["Partially installed",  "bg-amber-100 text-amber-800 border-amber-300"],
   alteration:  ["Alteration raised",    "bg-red-100 text-red-700 border-red-300"],
@@ -2341,9 +2357,9 @@ async function uploadOfficeFiles(files, folder) {
   const uid = data?.user?.id; if (!uid) throw new Error("Not signed in");
   const out = [];
   for (const f of files) {
-    const ext = (f.name.split(".").pop() || "jpg").toLowerCase();
+    const blob = await compressImage(f); const ext = uploadExt(f, blob);
     const path = `${uid}/${folder}/${crypto.randomUUID()}.${ext}`;
-    const { error } = await supabase.storage.from("invoices").upload(path, f, { contentType: f.type || "image/jpeg" });
+    const { error } = await supabase.storage.from("invoices").upload(path, blob, { contentType: blob.type || f.type || "image/jpeg" });
     if (error) throw new Error("Upload failed: " + error.message);
     out.push(path);
   }
