@@ -1541,6 +1541,13 @@ function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVi
   const d = new Date(date + "T00:00:00");
   const selCls = "bg-white border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-w-0 w-full";
   const missing = rows.filter(r => !r.support).length;
+  const [dispMap, setDispMap] = useState({});
+  const visitIdsKey = rows.filter(r => r.kind === "visit" && r.visit === "Installation").map(r => r.id).join(",");
+  useEffect(() => {
+    if (!visitIdsKey) { setDispMap({}); return; }
+    supabase.from("factory_dispatches").select("visit_id,status,approved_by").eq("kind", "dispatch").in("visit_id", visitIdsKey.split(","))
+      .then(({ data }) => setDispMap(Object.fromEntries((data || []).map(x => [x.visit_id, x]))));
+  }, [visitIdsKey]);
 
   return (
     <section>
@@ -1583,6 +1590,8 @@ function ScheduleView({ meetings, fieldVisits, city, onUpdateMeeting, onUpdateVi
                 <td className="px-3 py-2 whitespace-nowrap font-medium text-gray-900">
                   {r.customer || "—"}
                   {r.kind === "visit" && <span className="ml-1.5 text-[10px] uppercase tracking-wider bg-gray-100 text-gray-500 rounded px-1">visit</span>}
+                  {r.kind === "visit" && r.visit === "Installation" && (() => { const d = dispMap[r.id]; const m = { approved: ["📦 Factory approved", "bg-green-100 text-green-800"], partial: ["📦 Partly approved", "bg-amber-100 text-amber-800"], not_ready: ["📦 Not ready", "bg-red-100 text-red-700"] }[d?.status] || ["📦 Awaiting factory", "bg-yellow-100 text-yellow-800"];
+                    return <span className={`ml-1.5 text-[10px] font-semibold rounded px-1 ${m[1]}`} title={d?.approved_by ? `by ${d.approved_by}` : ""}>{m[0]}</span>; })()}
                   {r.raw && r.raw.client_id && <div className="font-mono text-[11px] text-blue-700">{r.raw.client_id}</div>}
                 </td>
                 <td className="px-3 py-2 max-w-[260px] truncate text-gray-700" title={r.address}>{r.address || "—"}</td>
@@ -1874,7 +1883,7 @@ function FieldTeamView({ city, user }) {
       const st = await supabase.from("staff").select("*").eq("city", city).order("role").order("name");
       if (!alive) return;
       if (st.error) { setErr(st.error.message); return; }
-      const list = (st.data || []).filter(s => s.active !== false); setStaff(list);
+      const list = (st.data || []).filter(s => s.active !== false && s.role !== "factory"); setStaff(list);
       const ids = list.map(s => s.id); if (!ids.length) { setExps([]); setJobs([]); setAdvs([]); return; }
       const [e, j, a, eAll] = await Promise.all([
         supabase.from("travel_expenses").select("*").in("staff_id", ids).gte("expense_date", from).lte("expense_date", to).order("expense_date", { ascending: false }).order("created_at", { ascending: false }),
@@ -2400,16 +2409,17 @@ function InstallationsView({ city, fieldVisits, user, readOnly, onAddVisit, onEd
     (async () => {
       const ids = cardVisits.map(v => v.id);
       const orderIds = Array.from(new Set(cardVisits.map(v => v.order_id).filter(Boolean)));
-      if (!ids.length) { setData({ reviews: {}, jobs: {}, bills: {}, orders: {}, cases: [], issues: {}, costs: {}, staff: [] }); return; }
+      if (!ids.length) { setData({ reviews: {}, jobs: {}, bills: {}, orders: {}, cases: [], issues: {}, costs: {}, staff: [], dispatches: {} }); return; }
       const chunk = (arr, n) => arr.length ? Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n)) : [[]];
       const many = async (fn) => (await Promise.all(chunk(ids, 150).map(fn))).flatMap(r => r.data || []);
-      const [reviews, jobs, bills, orders, cases, staff] = await Promise.all([
+      const [reviews, jobs, bills, orders, cases, staff, dispatches] = await Promise.all([
         many(c => supabase.from("installation_reviews").select("*").in("visit_id", c)),
         many(c => supabase.from("job_completions").select("*").in("job_id", c)),
         many(c => supabase.from("travel_expenses").select("*").in("visit_id", c)),
         orderIds.length ? supabase.from("customer_orders").select("id,customer_name,customer_mobile,client_id,customer_building_name,customer_landmark,customer_city,designer_name,windows_count,windows,balance_amount,balance_paid,special_note").in("id", orderIds).then(r => r.data || []) : Promise.resolve([]),
         orderIds.length ? supabase.from("alteration_cases").select("*").in("order_id", orderIds).order("raised_at").then(r => r.data || []) : Promise.resolve([]),
         supabase.from("staff").select("id,name,role,city").then(r => r.data || []),
+        many(c => supabase.from("factory_dispatches").select("*").in("visit_id", c)),
       ]);
       const caseIds = cases.map(c => c.id);
       const [issues, costs] = caseIds.length ? await Promise.all([
@@ -2419,7 +2429,7 @@ function InstallationsView({ city, fieldVisits, user, readOnly, onAddVisit, onEd
       if (!alive) return;
       const idx = (arr, k) => Object.fromEntries(arr.map(x => [x[k], x]));
       const grp = (arr, k) => arr.reduce((m, x) => ((m[x[k]] = m[x[k]] || []).push(x), m), {});
-      setData({ reviews: idx(reviews, "visit_id"), jobs: idx(jobs, "job_id"), bills: grp(bills, "visit_id"), orders: idx(orders, "id"), cases, issues: grp(issues, "case_id"), costs: grp(costs, "case_id"), staff });
+      setData({ reviews: idx(reviews, "visit_id"), jobs: idx(jobs, "job_id"), bills: grp(bills, "visit_id"), orders: idx(orders, "id"), cases, issues: grp(issues, "case_id"), costs: grp(costs, "case_id"), staff, dispatches: idx(dispatches, "visit_id") });
     })().catch(e => alive && setErr(e.message));
     return () => { alive = false; };
   }, [cardVisits, tick]);
@@ -2549,6 +2559,11 @@ function InstallationCard({ c, data, edit, city, onOutcome, onOpenCase, onSchedu
                     <div className="text-sm font-semibold text-gray-900">{fmtD(v.visit_date)} · {v.visit_type}</div>
                     <div className="text-xs text-gray-600">{v.timing || "time TBD"} · {v.support_name || <span className="text-amber-700">no support assigned</span>}{planned ? ` · ${planned} curtains planned` : ""}</div>
                     {v.visit_status && <div className="text-[11px] text-gray-500">Scheduling status: {v.visit_status}</div>}
+                    {(() => { const d = data.dispatches?.[v.id]; if (!d && v.visit_type !== "Installation" && v.visit_type !== "Collection for alteration") return null;
+                      const lbl = d?.kind === "return" ? (d.status === "received" ? "↩️ Received at factory" : "") : ({ approved: "📦 Factory approved", partial: "📦 Factory partly approved", not_ready: "📦 Factory: not ready" }[d?.status] || (v.visit_type === "Installation" ? "📦 Awaiting factory approval" : ""));
+                      if (!lbl) return null;
+                      const bad = (d?.items || []).filter(i => i.state !== "ready");
+                      return <div className={`text-[11px] mt-0.5 ${d?.status === "approved" || d?.status === "received" ? "text-green-700" : d?.status === "not_ready" ? "text-red-700" : "text-amber-700"}`}>{lbl}{d?.approved_by ? ` · ${d.approved_by}` : ""}{bad.length ? ` — held: ${bad.map(i => `${i.label} ${i.layer || ""}${i.reason ? " (" + i.reason + ")" : ""}`.trim()).join(", ")}` : ""}</div>; })()}
                     {edit && <button onClick={() => onEditVisit(v)} className="text-xs text-blue-600 hover:underline">Edit visit</button>}
                   </div>
                   <div className="lg:col-span-3 text-sm">

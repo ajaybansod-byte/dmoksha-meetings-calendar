@@ -74,6 +74,7 @@ function App() {
   if (!session) return <Login />;
   if (staff === null) return <Center><Spinner /></Center>;
   if (staff === false) return <Center><div className="text-center text-gray-600 p-6">Your login isn't linked to a staff profile. Please contact admin.<br/><button onClick={() => supabase.auth.signOut()} className="mt-4 text-blue-600 underline">Sign out</button></div></Center>;
+  if (staff.role === "factory") return <FactoryHome staff={staff} />;
   return <Home staff={staff} />;
 }
 
@@ -201,6 +202,7 @@ function DayList({ staff, date, section, refreshKey, onChanged }) {
   const [rows, setRows] = useState(null);
   const [expenses, setExpenses] = useState([]);
   const [jobs, setJobs] = useState({});
+  const [disp, setDisp] = useState({});       // visit_id -> factory dispatch status
   const [open, setOpen] = useState(null);     // expense form
   const [sheet, setSheet] = useState(null);   // job sheet
   useEffect(() => {
@@ -222,6 +224,10 @@ function DayList({ staff, date, section, refreshKey, onChanged }) {
       setRows([...mm, ...vv].sort((a,b) => (timeToMinutes(a.time) ?? 9999) - (timeToMinutes(b.time) ?? 9999)));
       setExpenses(e.data || []);
       const jm = {}; (j.data || []).forEach(x => { jm[x.job_id] = x; }); setJobs(jm);
+      if (section === "install" && vv.length) {
+        const r = await supabase.from("factory_dispatches").select("visit_id,status").eq("kind", "dispatch").in("visit_id", vv.map(x => x.id));
+        if (alive) setDisp(Object.fromEntries((r.data || []).map(x => [x.visit_id, x.status])));
+      } else setDisp({});
     })();
     return () => { alive = false; };
   }, [date, staff.id, section, refreshKey]);
@@ -246,6 +252,7 @@ function DayList({ staff, date, section, refreshKey, onChanged }) {
               <div className="flex flex-col items-end gap-1">
                 {r.type && <span className="text-[10px] bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 whitespace-nowrap">{r.type}</span>}
                 {st && <span className={`text-[10px] font-semibold rounded px-1.5 py-0.5 whitespace-nowrap ${st[1]}`}>{st[0]}</span>}
+                {r.visit === "Installation" && !done && (() => { const d = DISPATCH_UI[disp[r.id] || "pending"]; return <span className={`text-[10px] font-semibold rounded px-1.5 py-0.5 whitespace-nowrap ${d[1]}`}>📦 {d[0]}</span>; })()}
               </div>
             </div>
             {r.address && <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.address)}`} target="_blank" rel="noopener" className="block text-sm text-gray-700 mt-2 underline decoration-gray-300">📍 {r.address}</a>}
@@ -288,6 +295,12 @@ function JobSheet({ staff, date, row, existing, onClose, onSaved }) {
   const [reason, setReason] = useState(existing?.unfinished_reason || "");
   const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
   const [savedTick, setSavedTick] = useState(false);
+  const [dispatch, setDispatch] = useState(isInstall ? undefined : null);   // factory pick-up approval
+  const loadDispatch = () => supabase.from("factory_dispatches").select("*").eq("visit_id", row.id).eq("kind", "dispatch").maybeSingle().then(({ data }) => setDispatch(data || null));
+  useEffect(() => { if (isInstall) loadDispatch(); }, [row.id]);
+  const dispStatus = dispatch?.status || "pending";
+  const blocked = isInstall && !readOnly && (dispatch === undefined || dispStatus === "pending" || dispStatus === "not_ready");
+  const notDispatched = (dispatch?.items || []).filter(i => i.state !== "ready");
   useEffect(() => {
     history.pushState({ jobSheet: true }, "");
     const onPop = () => onClose();
@@ -313,7 +326,14 @@ function JobSheet({ staff, date, row, existing, onClose, onSaved }) {
   }, [row.orderId]);
 
   // Only the curtains the office selected for this visit; fall back to the whole order for older visits
-  const items = useMemo(() => (Array.isArray(row.installItems) && row.installItems.length) ? row.installItems : checklistFromOrder(order), [order, row.installItems]);
+  const allItems = useMemo(() => (Array.isArray(row.installItems) && row.installItems.length) ? row.installItems : checklistFromOrder(order), [order, row.installItems]);
+  // Only curtains the factory actually released go on the checklist
+  const items = useMemo(() => {
+    const rel = (dispatch?.items || []);
+    if (!rel.length || rel.some(i => i.key === "all")) return allItems;
+    const ok = new Set(rel.filter(i => i.state === "ready").map(i => i.key));
+    return allItems.filter(i => ok.has(i.key));
+  }, [allItems, dispatch]);
   const ticked = items.filter(i => checks[i.key]).length;
   const orderTotal = money?.total ?? null;
   const tools = useMemo(() => orderTotal != null && orderTotal >= CARE_KIT_MIN ? [...INSTALL_TOOLS, CARE_KIT] : INSTALL_TOOLS, [orderTotal]);
@@ -419,6 +439,23 @@ function JobSheet({ staff, date, row, existing, onClose, onSaved }) {
             {row.partner && <div className="text-sm text-gray-600 mt-1">👤 Stylist: {row.partner}</div>}
           </section>
 
+          {isInstall && !readOnly && (dispatch === undefined ? <Center><Spinner /></Center> : blocked ? (
+            <section className={`rounded-xl border-2 p-4 text-center ${dispStatus === "not_ready" ? "border-red-300 bg-red-50" : "border-yellow-300 bg-yellow-50"}`}>
+              <div className="text-3xl">{dispStatus === "not_ready" ? "⛔" : "⏳"}</div>
+              <div className="font-semibold text-gray-900 mt-1">{dispStatus === "not_ready" ? "Factory says the items are not ready" : "Waiting for factory dispatch approval"}</div>
+              <div className="text-sm text-gray-700 mt-1">{dispStatus === "not_ready" ? "Do not pick up. Please call the office." : "Don't pick up the curtains yet. The job sheet opens once the factory approves the dispatch."}</div>
+              {notDispatched.length > 0 && <div className="text-left text-sm mt-3 space-y-1">{notDispatched.map(i => <div key={i.key} className="text-red-700">✗ {i.label} {i.layer}{i.reason ? ` — ${i.reason}` : ""}</div>)}</div>}
+              {dispatch?.note && <div className="text-xs text-amber-800 mt-2">{dispatch.note}</div>}
+              <button onClick={loadDispatch} className="mt-3 px-4 py-2 rounded-lg bg-white border border-gray-300 text-sm font-semibold">↻ Check again</button>
+            </section>
+          ) : (
+            <section className="rounded-xl border border-green-300 bg-green-50 p-3 text-sm text-green-800">
+              ✅ <b>{dispStatus === "partial" ? "Partly approved" : "Dispatch approved"}</b> by {dispatch.approved_by} · {new Date(dispatch.approved_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}. Pick up the items below.
+              {notDispatched.length > 0 && <div className="mt-2 text-amber-800">Not released by factory: {notDispatched.map(i => `${i.label} ${i.layer}${i.reason ? ` (${i.reason})` : ""}`).join(", ")} — the office will schedule these separately.</div>}
+            </section>
+          ))}
+
+          {!blocked && <>
           {/* Installation: order summary + checklist */}
           {isInstall && (order === undefined ? <Center><Spinner /></Center> : !order ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">No order is linked to this visit, so the curtain checklist isn't available. Please ask the office to link the order. You can still mark the job complete with photos.</div>
@@ -530,8 +567,9 @@ function JobSheet({ staff, date, row, existing, onClose, onSaved }) {
               <Field label="Why couldn't the job be finished?"><textarea rows="3" value={reason} onChange={e => setReason(e.target.value)} className={inp} placeholder="e.g. Customer not at home / 2 curtains short / wrong size" /></Field>
             </section>
           )}
+          </>}
         </div>
-        {!readOnly && (
+        {!readOnly && !blocked && (
           <div className="sticky bottom-0 bg-white border-t border-gray-200 p-4 pb-safe grid grid-cols-2 gap-2">
             {mode === "unfinished"
               ? <><button type="button" disabled={busy} onClick={() => setMode(null)} className="py-3 rounded-lg border border-gray-300 text-gray-700 font-semibold">Back</button>
@@ -541,6 +579,237 @@ function JobSheet({ staff, date, row, existing, onClose, onSaved }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// =========================================================
+//        Factory portal (role "factory"): dispatch approvals, returns, alterations
+// =========================================================
+const DISPATCH_UI = {
+  pending:   ["Waiting for factory", "bg-yellow-100 text-yellow-800"],
+  approved:  ["Dispatch approved", "bg-green-100 text-green-800"],
+  partial:   ["Partly approved", "bg-amber-100 text-amber-800"],
+  not_ready: ["Not ready", "bg-red-100 text-red-700"],
+  received:  ["Received", "bg-green-100 text-green-800"],
+};
+const dispatchItemsFor = (visit, order) => {
+  const list = (Array.isArray(visit.install_items) && visit.install_items.length) ? visit.install_items : checklistFromOrder(order);
+  return list.length ? list : [{ key: "all", label: "All items for this order", layer: "" }];
+};
+
+function FactoryHome({ staff }) {
+  const [tab, setTab] = useState("dispatch");
+  const [date, setDate] = useState(toISO(new Date()));
+  const [menu, setMenu] = useState(false);
+  const [pwOpen, setPwOpen] = useState(false);
+  const today = toISO(new Date()), tomorrow = addDays(today, 1);
+  return (
+    <div className="min-h-screen pb-24">
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
+        <div className="px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3"><Logo className="h-8" /><div><div className="text-sm font-semibold text-gray-900">{staff.name}</div><div className="text-[11px] text-gray-500">Factory · Production</div></div></div>
+          <button onClick={() => setMenu(m => !m)} className="w-9 h-9 rounded-full hover:bg-gray-100 inline-flex items-center justify-center text-gray-700">⋮</button>
+        </div>
+        {menu && <div className="absolute right-3 top-14 bg-white border border-gray-200 rounded-lg shadow-lg text-sm w-48">
+          <button onClick={() => { setMenu(false); setPwOpen(true); }} className="block w-full text-left px-4 py-3 hover:bg-gray-50">Change password</button>
+          <button onClick={() => supabase.auth.signOut()} className="block w-full text-left px-4 py-3 hover:bg-gray-50 text-red-600">Sign out</button>
+        </div>}
+        {tab !== "alterations" && (
+          <div className="px-4 pb-3 flex items-center gap-2">
+            {[[today, "Today"], [tomorrow, "Tomorrow"]].map(([d, l]) => (
+              <button key={d} onClick={() => setDate(d)} className={`px-3 py-1.5 rounded-full text-sm font-medium border ${date === d ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300"}`}>{l}</button>
+            ))}
+            <input type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} className={`ml-auto border rounded-full px-3 py-1.5 text-sm ${date !== today && date !== tomorrow ? "border-blue-600 text-blue-700 font-medium" : "border-gray-300 text-gray-600"}`} />
+          </div>
+        )}
+      </header>
+      <main className="px-4 py-4">
+        {tab === "dispatch" && <FactoryDispatch staff={staff} date={date} />}
+        {tab === "returns" && <FactoryReturns staff={staff} date={date} />}
+        {tab === "alterations" && <FactoryAlterations staff={staff} />}
+      </main>
+      <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 pb-safe z-30">
+        <div className="grid grid-cols-3">
+          {[["dispatch", "Dispatch", "📦"], ["returns", "Returns", "↩️"], ["alterations", "Alterations", "🧵"]].map(([k, l, ic]) => (
+            <button key={k} onClick={() => setTab(k)} className={`py-2 text-[11px] font-medium flex flex-col items-center gap-0.5 ${tab === k ? "text-blue-600 border-t-2 border-blue-600 -mt-px" : "text-gray-500"}`}><span className="text-lg leading-none">{ic}</span>{l}</button>
+          ))}
+        </div>
+      </nav>
+      {pwOpen && <ChangePassword onClose={() => setPwOpen(false)} />}
+    </div>
+  );
+}
+
+function useFactoryVisits(date, type, tick) {
+  const [state, setState] = useState(null);
+  useEffect(() => {
+    let alive = true; setState(null);
+    (async () => {
+      const v = await supabase.from("field_visits").select("*").eq("visit_date", date).eq("visit_type", type).is("deleted_at", null);
+      const visits = (v.data || []).sort((a, b) => (timeToMinutes(a.timing) ?? 9999) - (timeToMinutes(b.timing) ?? 9999));
+      const ids = visits.map(x => x.id);
+      const orderIds = Array.from(new Set(visits.map(x => x.order_id).filter(Boolean)));
+      const names = Array.from(new Set(visits.map(x => x.support_name).filter(Boolean)));
+      const [d, o, s] = await Promise.all([
+        ids.length ? supabase.from("factory_dispatches").select("*").in("visit_id", ids) : Promise.resolve({ data: [] }),
+        orderIds.length ? supabase.from("customer_orders").select("id,windows,customer_city,special_note").in("id", orderIds) : Promise.resolve({ data: [] }),
+        names.length ? supabase.from("staff").select("name,mobile").in("name", names) : Promise.resolve({ data: [] }),
+      ]);
+      if (!alive) return;
+      setState({ visits, disp: Object.fromEntries((d.data || []).map(x => [x.visit_id, x])), orders: Object.fromEntries((o.data || []).map(x => [x.id, x])), phones: Object.fromEntries((s.data || []).map(x => [x.name, x.mobile])) });
+    })();
+    return () => { alive = false; };
+  }, [date, type, tick]);
+  return state;
+}
+
+function FactoryDispatch({ staff, date }) {
+  const [tick, setTick] = useState(0);
+  const st = useFactoryVisits(date, "Installation", tick);
+  if (!st) return <Center><Spinner /></Center>;
+  const approved = st.visits.filter(v => ["approved", "partial"].includes(st.disp[v.id]?.status)).length;
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-3"><h2 className="text-lg font-semibold">{niceDate(date)}</h2><span className="text-sm text-gray-500">{st.visits.length} pick-up{st.visits.length === 1 ? "" : "s"} · {approved} approved</span></div>
+      {st.visits.length === 0 && <div className="text-center text-gray-500 py-16">No installation pick-ups on this day.</div>}
+      <div className="space-y-3">{st.visits.map(v => <DispatchCard key={v.id} staff={staff} v={v} order={st.orders[v.order_id]} disp={st.disp[v.id]} phone={st.phones[v.support_name]} onSaved={() => setTick(t => t + 1)} />)}</div>
+    </div>
+  );
+}
+
+function DispatchCard({ staff, v, order, disp, phone, onSaved }) {
+  const items = dispatchItemsFor(v, order);
+  const saved = disp && disp.status !== "pending" && Array.isArray(disp.items);
+  const [editing, setEditing] = useState(!saved);
+  const [marks, setMarks] = useState(() => Object.fromEntries((disp?.items || []).map(i => [i.key, { state: i.state, reason: i.reason || "" }])));
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
+  const ui = DISPATCH_UI[disp?.status || "pending"];
+  const set = (k, patch) => setMarks(m => ({ ...m, [k]: { ...(m[k] || {}), ...patch } }));
+  const allReady = () => setMarks(Object.fromEntries(items.map(i => [i.key, { state: "ready", reason: "" }])));
+  const submit = async () => {
+    if (items.some(i => !marks[i.key]?.state)) { setErr("Mark every item as Ready or Not ready."); return; }
+    if (items.some(i => marks[i.key].state === "not_ready" && !(marks[i.key].reason || "").trim())) { setErr("Give a reason for each item that is not ready."); return; }
+    const out = items.map(i => ({ key: i.key, label: i.label, layer: i.layer || "", state: marks[i.key].state, reason: marks[i.key].state === "not_ready" ? marks[i.key].reason.trim() : null }));
+    const nReady = out.filter(i => i.state === "ready").length;
+    const status = nReady === out.length ? "approved" : nReady === 0 ? "not_ready" : "partial";
+    setBusy(true); setErr(null);
+    const { error } = await supabase.from("factory_dispatches").upsert({ visit_id: v.id, kind: "dispatch", status, items: out, note: null, approved_by: staff.name, approved_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: "visit_id" });
+    setBusy(false);
+    if (error) { setErr(error.message); return; }
+    setEditing(false); onSaved();
+  };
+  return (
+    <div className={`bg-white border rounded-xl shadow-sm p-4 ${disp?.status === "approved" ? "border-green-300" : disp?.status === "not_ready" ? "border-red-300" : disp?.status === "partial" ? "border-amber-300" : "border-gray-200"}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold text-blue-600">{v.timing || "Time TBD"} · {v.city || "Mumbai"}</div>
+          <div className="text-base font-semibold text-gray-900">{v.customer_name || "—"}</div>
+          <div className="text-[11px] text-gray-600">{v.client_id && <span className="font-mono font-semibold text-blue-700 mr-2">{v.client_id}</span>}{v.order_id ? `Order #${v.order_id}` : "No order linked"}</div>
+        </div>
+        <span className={`text-[10px] font-semibold rounded px-1.5 py-0.5 whitespace-nowrap ${ui[1]}`}>{ui[0]}</span>
+      </div>
+      <div className="text-sm text-gray-700 mt-2">🚚 Pick-up by <b>{v.support_name || "— not assigned —"}</b>{phone && <a href={`tel:${phone}`} className="text-blue-600 ml-2">📞 {phone}</a>}</div>
+      {order?.special_note && <div className="mt-2 text-sm bg-yellow-50 border border-yellow-200 rounded-lg p-2 text-yellow-900">📝 {order.special_note}</div>}
+      {disp?.note && disp.status === "pending" && <div className="mt-2 text-xs text-amber-700">{disp.note}</div>}
+      {err && <div className="mt-2 p-2 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">{err}</div>}
+
+      {!editing ? (
+        <div className="mt-3">
+          <div className="divide-y divide-gray-100">{(disp.items || []).map(i => (
+            <div key={i.key} className="py-2 flex items-start gap-2 text-sm">
+              <span className={`mt-0.5 ${i.state === "ready" ? "text-green-600" : "text-red-600"}`}>{i.state === "ready" ? "✓" : "✗"}</span>
+              <div><span className="text-gray-900">{i.label} <b>{i.layer}</b></span>{i.reason && <div className="text-xs text-red-700">{i.reason}</div>}</div>
+            </div>))}</div>
+          <div className="text-[11px] text-gray-500 mt-1">By {disp.approved_by} · {new Date(disp.approved_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</div>
+          <button onClick={() => setEditing(true)} className="mt-2 w-full py-2 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700">Change</button>
+        </div>
+      ) : (
+        <div className="mt-3">
+          <div className="flex items-center justify-between mb-1"><div className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Items to hand over ({items.length})</div><button onClick={allReady} className="text-xs font-semibold text-green-700">All ready</button></div>
+          <div className="divide-y divide-gray-100">
+            {items.map(i => { const m = marks[i.key] || {}; return (
+              <div key={i.key} className="py-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="flex-1 text-sm text-gray-900">{i.label} <b>{i.layer}</b></span>
+                  <button onClick={() => set(i.key, { state: "ready" })} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${m.state === "ready" ? "bg-green-600 text-white border-green-600" : "bg-white text-gray-700 border-gray-300"}`}>✓ Ready</button>
+                  <button onClick={() => set(i.key, { state: "not_ready" })} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${m.state === "not_ready" ? "bg-red-600 text-white border-red-600" : "bg-white text-gray-700 border-gray-300"}`}>✗ Not ready</button>
+                </div>
+                {m.state === "not_ready" && <input value={m.reason || ""} onChange={e => set(i.key, { reason: e.target.value })} placeholder="Reason, e.g. still in stitching" className="mt-2 w-full border border-red-200 rounded-lg px-3 py-2 text-sm" />}
+              </div>); })}
+          </div>
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            {saved && <button onClick={() => setEditing(false)} className="py-2.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700">Cancel</button>}
+            <button disabled={busy} onClick={submit} className={`${saved ? "" : "col-span-2"} py-2.5 rounded-lg bg-gray-900 text-white text-sm font-semibold disabled:opacity-60`}>{busy ? "Saving…" : "Submit dispatch approval"}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FactoryReturns({ staff, date }) {
+  const [tick, setTick] = useState(0);
+  const st = useFactoryVisits(date, "Collection for alteration", tick);
+  const [notes, setNotes] = useState({});
+  if (!st) return <Center><Spinner /></Center>;
+  const receive = async (v) => {
+    const { error } = await supabase.from("factory_dispatches").upsert({ visit_id: v.id, kind: "return", status: "received", note: notes[v.id] || null, approved_by: staff.name, approved_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: "visit_id" });
+    if (error) alert(error.message); else setTick(t => t + 1);
+  };
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-3"><h2 className="text-lg font-semibold">{niceDate(date)}</h2><span className="text-sm text-gray-500">{st.visits.length} return{st.visits.length === 1 ? "" : "s"} expected</span></div>
+      {st.visits.length === 0 && <div className="text-center text-gray-500 py-16">No alteration pieces coming back on this day.</div>}
+      <div className="space-y-3">{st.visits.map(v => { const d = st.disp[v.id]; return (
+        <div key={v.id} className={`bg-white border rounded-xl shadow-sm p-4 ${d?.status === "received" ? "border-green-300" : "border-gray-200"}`}>
+          <div className="flex items-start justify-between gap-2"><div><div className="text-xs font-semibold text-blue-600">{v.timing || "Time TBD"} · {v.city || "Mumbai"}</div><div className="text-base font-semibold">{v.customer_name}</div><div className="text-[11px] text-gray-600">{v.client_id && <span className="font-mono font-semibold text-blue-700 mr-2">{v.client_id}</span>}{v.order_id ? `Order #${v.order_id}` : ""}</div></div>
+            {d?.status === "received" && <span className="text-[10px] font-semibold rounded px-1.5 py-0.5 bg-green-100 text-green-800">Received</span>}</div>
+          <div className="text-sm text-gray-700 mt-2">↩️ Bringing back: <b>{v.support_name || "—"}</b>{st.phones[v.support_name] && <a href={`tel:${st.phones[v.support_name]}`} className="text-blue-600 ml-2">📞 {st.phones[v.support_name]}</a>}</div>
+          {d?.status === "received" ? <div className="text-xs text-gray-500 mt-2">Received by {d.approved_by} · {new Date(d.approved_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}{d.note ? ` — ${d.note}` : ""}</div>
+            : <div className="mt-3 flex gap-2"><input value={notes[v.id] || ""} onChange={e => setNotes(n => ({ ...n, [v.id]: e.target.value }))} placeholder="Pieces received / note" className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm" /><button onClick={() => receive(v)} className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-semibold">Received</button></div>}
+        </div>); })}</div>
+    </div>
+  );
+}
+
+function FactoryAlterations({ staff }) {
+  const [rows, setRows] = useState(null); const [issues, setIssues] = useState({}); const [tick, setTick] = useState(0);
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => {
+    (async () => {
+      let q = supabase.from("alteration_cases").select("*").order("raised_at", { ascending: false });
+      if (!showAll) q = q.in("status", ["open", "in_progress"]);
+      const c = await q; const list = c.data || [];
+      const i = list.length ? await supabase.from("alteration_issues").select("*").in("case_id", list.map(x => x.id)).order("created_at") : { data: [] };
+      setIssues((i.data || []).reduce((m, x) => ((m[x.case_id] = m[x.case_id] || []).push(x), m), {})); setRows(list);
+    })();
+  }, [tick, showAll]);
+  const setCase = async (c, status) => { const { error } = await supabase.from("alteration_cases").update({ status, updated_at: new Date().toISOString(), ...(status === "resolved" ? { resolved_by: staff.name, resolved_at: new Date().toISOString() } : {}) }).eq("id", c.id); if (error) alert(error.message); else setTick(t => t + 1); };
+  const toggleIssue = async (i) => { await supabase.from("alteration_issues").update({ status: i.status === "resolved" ? "open" : "resolved" }).eq("id", i.id); setTick(t => t + 1); };
+  if (!rows) return <Center><Spinner /></Center>;
+  const CU = { open: ["Open", "bg-red-100 text-red-700"], in_progress: ["In progress", "bg-amber-100 text-amber-800"], resolved: ["Resolved", "bg-green-100 text-green-800"], cancelled: ["Cancelled", "bg-gray-100 text-gray-600"] };
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3"><h2 className="text-lg font-semibold">Alterations</h2><label className="text-sm text-gray-600 inline-flex items-center gap-1.5"><input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} /> Show resolved</label></div>
+      {rows.length === 0 && <div className="text-center text-gray-500 py-16">No open alteration cases.</div>}
+      <div className="space-y-3">{rows.map(c => { const cu = CU[c.status] || CU.open; const iss = issues[c.id] || []; return (
+        <div key={c.id} className="bg-white border border-gray-200 rounded-xl shadow-sm p-4">
+          <div className="flex items-start justify-between gap-2"><div><div className="text-xs font-semibold text-red-700">Case #{c.case_no} · {c.city || ""}</div><div className="text-base font-semibold">{c.customer_name}</div><div className="text-[11px] text-gray-600">{c.client_id && <span className="font-mono font-semibold text-blue-700 mr-2">{c.client_id}</span>}{c.order_id ? `Order #${c.order_id}` : ""} · raised {new Date(c.raised_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })} by {c.raised_by}</div></div>
+            <span className={`text-[10px] font-semibold rounded px-1.5 py-0.5 ${cu[1]}`}>{cu[0]}</span></div>
+          <div className="mt-2 divide-y divide-gray-100">{iss.map(i => (
+            <label key={i.id} className="py-2 flex items-start gap-2">
+              <input type="checkbox" checked={i.status === "resolved"} onChange={() => toggleIssue(i)} className="mt-1 w-5 h-5 accent-green-600" />
+              <div className="min-w-0"><div className={`text-sm font-semibold ${i.status === "resolved" ? "line-through text-gray-400" : ""}`}>{i.item_label}{i.layer ? ` · ${i.layer}` : ""} <span className="text-xs text-red-700">({i.issue_type})</span></div>
+                {i.description && <div className="text-sm text-gray-700">{i.description}</div>}
+                {(i.photos || []).length > 0 && <div className="flex gap-1 mt-1">{i.photos.map(p => <a key={p} href={publicUrl(p)} target="_blank" rel="noopener"><img src={publicUrl(p)} className="h-14 w-14 object-cover rounded border" /></a>)}</div>}</div>
+            </label>))}</div>
+          {c.note && <div className="text-xs text-gray-600 mt-1">📝 {c.note}</div>}
+          <div className="grid grid-cols-2 gap-2 mt-3">
+            {c.status === "open" && <button onClick={() => setCase(c, "in_progress")} className="py-2 rounded-lg bg-amber-500 text-white text-sm font-semibold">Start work</button>}
+            {(c.status === "open" || c.status === "in_progress") && <button onClick={() => { if (confirm("Mark this alteration as done and ready to send back?")) setCase(c, "resolved"); }} className="py-2 rounded-lg bg-green-600 text-white text-sm font-semibold">Done ✓</button>}
+          </div>
+        </div>); })}</div>
     </div>
   );
 }
