@@ -1883,7 +1883,7 @@ function FieldTeamView({ city, user }) {
       const st = await supabase.from("staff").select("*").eq("city", city).order("role").order("name");
       if (!alive) return;
       if (st.error) { setErr(st.error.message); return; }
-      const list = (st.data || []).filter(s => s.active !== false && s.role !== "factory"); setStaff(list);
+      const list = (st.data || []).filter(s => s.active !== false && !["factory", "ops"].includes(s.role)); setStaff(list);
       const ids = list.map(s => s.id); if (!ids.length) { setExps([]); setJobs([]); setAdvs([]); return; }
       const [e, j, a, eAll] = await Promise.all([
         supabase.from("travel_expenses").select("*").in("staff_id", ids).gte("expense_date", from).lte("expense_date", to).order("expense_date", { ascending: false }).order("created_at", { ascending: false }),

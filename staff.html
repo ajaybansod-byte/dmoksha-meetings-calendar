@@ -75,6 +75,7 @@ function App() {
   if (staff === null) return <Center><Spinner /></Center>;
   if (staff === false) return <Center><div className="text-center text-gray-600 p-6">Your login isn't linked to a staff profile. Please contact admin.<br/><button onClick={() => supabase.auth.signOut()} className="mt-4 text-blue-600 underline">Sign out</button></div></Center>;
   if (staff.role === "factory") return <FactoryHome staff={staff} />;
+  if (staff.role === "ops") return <OpsHome staff={staff} />;
   return <Home staff={staff} />;
 }
 
@@ -814,6 +815,144 @@ function FactoryAlterations({ staff }) {
   );
 }
 
+// =========================================================
+//   Operations (role "ops"): submit travel bills on behalf of support staff
+//   for every field visit except meetings
+// =========================================================
+function OpsHome({ staff: me }) {
+  const [tab, setTab] = useState("visits");
+  const [date, setDate] = useState(toISO(new Date()));
+  const [city, setCity] = useState("");
+  const [menu, setMenu] = useState(false);
+  const [pwOpen, setPwOpen] = useState(false);
+  const [team, setTeam] = useState([]);
+  const [tick, setTick] = useState(0);
+  useEffect(() => { supabase.from("staff").select("id,name,role,city,mobile,active").eq("role", "support").then(r => setTeam((r.data || []).filter(s => s.active !== false))); }, []);
+  const today = toISO(new Date()), tomorrow = addDays(today, 1), yesterday = addDays(today, -1);
+  return (
+    <div className="min-h-screen pb-24">
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
+        <div className="px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3"><Logo className="h-8" /><div><div className="text-sm font-semibold text-gray-900">{me.name}</div><div className="text-[11px] text-gray-500">Operations · bills for support staff</div></div></div>
+          <button onClick={() => setMenu(m => !m)} className="w-9 h-9 rounded-full hover:bg-gray-100 inline-flex items-center justify-center text-gray-700">⋮</button>
+        </div>
+        {menu && <div className="absolute right-3 top-14 bg-white border border-gray-200 rounded-lg shadow-lg text-sm w-48">
+          <button onClick={() => { setMenu(false); setPwOpen(true); }} className="block w-full text-left px-4 py-3 hover:bg-gray-50">Change password</button>
+          <button onClick={() => supabase.auth.signOut()} className="block w-full text-left px-4 py-3 hover:bg-gray-50 text-red-600">Sign out</button>
+        </div>}
+        <div className="px-4 pb-3 flex flex-wrap items-center gap-2">
+          {tab === "visits" && [[yesterday, "Yesterday"], [today, "Today"], [tomorrow, "Tomorrow"]].map(([d, l]) => (
+            <button key={d} onClick={() => setDate(d)} className={`px-3 py-1.5 rounded-full text-sm font-medium border ${date === d ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300"}`}>{l}</button>
+          ))}
+          {tab === "visits" && <input type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} className="border border-gray-300 rounded-full px-3 py-1.5 text-sm text-gray-600" />}
+          <select value={city} onChange={e => setCity(e.target.value)} className="ml-auto border border-gray-300 rounded-full px-3 py-1.5 text-sm text-gray-700">
+            <option value="">All cities</option>{["Mumbai", "Pune", "Bhubaneswar"].map(c => <option key={c}>{c}</option>)}
+          </select>
+        </div>
+      </header>
+      <main className="px-4 py-4">
+        {tab === "visits" && <OpsVisits me={me} team={team} city={city} from={date} to={date} tick={tick} onChanged={() => setTick(t => t + 1)} />}
+        {tab === "pending" && <OpsVisits me={me} team={team} city={city} from={today.slice(0, 8) + "01"} to={today} pendingOnly tick={tick} onChanged={() => setTick(t => t + 1)} />}
+        {tab === "submitted" && <OpsSubmitted me={me} city={city} tick={tick} />}
+      </main>
+      <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 pb-safe z-30">
+        <div className="grid grid-cols-3">
+          {[["visits", "Visits", "🚚"], ["pending", "Bills pending", "⏳"], ["submitted", "Submitted", "₹"]].map(([k, l, ic]) => (
+            <button key={k} onClick={() => setTab(k)} className={`py-2 text-[11px] font-medium flex flex-col items-center gap-0.5 ${tab === k ? "text-blue-600 border-t-2 border-blue-600 -mt-px" : "text-gray-500"}`}><span className="text-lg leading-none">{ic}</span>{l}</button>
+          ))}
+        </div>
+      </nav>
+      {pwOpen && <ChangePassword onClose={() => setPwOpen(false)} />}
+    </div>
+  );
+}
+
+function OpsVisits({ me, team, city, from, to, pendingOnly, tick, onChanged }) {
+  const [rows, setRows] = useState(null);
+  const [bills, setBills] = useState({});
+  const [who, setWho] = useState("");
+  const [form, setForm] = useState(null);   // { visit, person }
+  useEffect(() => {
+    let alive = true; setRows(null);
+    (async () => {
+      let q = supabase.from("field_visits").select("*").gte("visit_date", from).lte("visit_date", to).is("deleted_at", null).neq("visit_type", "Meeting");
+      if (city) q = q.eq("city", city);
+      const v = await q;
+      const visits = (v.data || []).filter(x => x.visit_type).sort((a, b) => b.visit_date.localeCompare(a.visit_date) || (timeToMinutes(a.timing) ?? 9999) - (timeToMinutes(b.timing) ?? 9999));
+      const ids = visits.map(x => x.id);
+      const e = ids.length ? await supabase.from("travel_expenses").select("id,visit_id,staff_name,fare_to,fare_back,payment_method,review_status,submitted_by").in("visit_id", ids) : { data: [] };
+      if (!alive) return;
+      const bm = {}; (e.data || []).forEach(b => (bm[b.visit_id] = bm[b.visit_id] || []).push(b));
+      setBills(bm); setRows(visits);
+    })();
+    return () => { alive = false; };
+  }, [from, to, city, tick]);
+  if (rows === null) return <Center><Spinner /></Center>;
+  const personFor = name => team.find(t => t.name === name);
+  let list = rows.filter(v => !who || v.support_name === who);
+  if (pendingOnly) list = list.filter(v => !(bills[v.id] || []).length && v.visit_status !== "Cancel" && v.visit_status !== "Rescheduled");
+  const names = Array.from(new Set(rows.map(v => v.support_name).filter(Boolean))).sort();
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <h2 className="text-lg font-semibold">{pendingOnly ? "This month · no bill yet" : niceDate(from)}</h2>
+        <select value={who} onChange={e => setWho(e.target.value)} className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm"><option value="">All staff</option>{names.map(n => <option key={n}>{n}</option>)}</select>
+      </div>
+      <div className="text-xs text-gray-500 mb-3">{list.length} visit{list.length === 1 ? "" : "s"} · installations, collections, measurements and other field visits (meetings not included)</div>
+      {list.length === 0 && <div className="text-center text-gray-500 py-16">{pendingOnly ? "✓ Every visit this month has a travel bill." : "No field visits on this day."}</div>}
+      <div className="space-y-3">
+        {list.map(v => { const bs = bills[v.id] || []; const p = personFor(v.support_name); return (
+          <div key={v.id} className={`bg-white border rounded-xl shadow-sm p-4 ${bs.length ? "border-green-300" : "border-gray-200"}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-xs font-semibold text-blue-600">{niceDate(v.visit_date)} · {v.timing || "time TBD"} · {v.visit_type}</div>
+                <div className="text-base font-semibold text-gray-900">{v.customer_name || "—"}</div>
+                <div className="text-[11px] text-gray-600">{v.client_id && <span className="font-mono font-semibold text-blue-700 mr-2">{v.client_id}</span>}{v.city || "Mumbai"}{v.address ? ` · ${v.address}` : ""}</div>
+              </div>
+              {v.visit_status && <span className="text-[10px] bg-gray-100 text-gray-600 rounded px-1.5 py-0.5">{v.visit_status}</span>}
+            </div>
+            <div className="text-sm text-gray-700 mt-2">👤 Support: <b>{v.support_name || <span className="text-amber-700">not assigned</span>}</b></div>
+            {bs.map(b => (
+              <div key={b.id} className="mt-2 text-sm text-green-800 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                ✓ {b.staff_name}: <b>{inr(Number(b.fare_to || 0) + Number(b.fare_back || 0))}</b> · {b.payment_method} · {b.review_status || "pending"}{b.submitted_by ? <span className="text-xs text-gray-600"> · added by {b.submitted_by}</span> : ""}
+              </div>))}
+            {v.support_name && (p
+              ? <button onClick={() => setForm({ visit: v, person: p })} className={`mt-3 w-full py-2.5 rounded-lg text-sm font-semibold ${bs.length ? "bg-white border border-gray-300 text-gray-700" : "bg-blue-600 text-white"}`}>{bs.length ? `+ Add another bill for ${p.name}` : `Add travel expense for ${p.name}`}</button>
+              : <div className="mt-2 text-xs text-amber-700">"{v.support_name}" has no staff profile — ask Ajay to create one.</div>)}
+          </div>); })}
+      </div>
+      {form && <ExpenseForm
+        staff={{ id: form.person.id, name: form.person.name, city: form.person.city || form.visit.city, auth_user_id: me.auth_user_id, submitted_by: me.name }}
+        date={form.visit.visit_date}
+        row={{ kind: "visit", id: form.visit.id, customer: `${form.visit.customer_name || ""} · ${form.visit.visit_type} · for ${form.person.name}` , customerName: form.visit.customer_name }}
+        onClose={() => setForm(null)} onSaved={() => { setForm(null); onChanged(); }} />}
+    </div>
+  );
+}
+
+function OpsSubmitted({ me, city, tick }) {
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    let q = supabase.from("travel_expenses").select("*").eq("submitted_by", me.name).order("expense_date", { ascending: false }).limit(300);
+    if (city) q = q.eq("city", city);
+    q.then(r => setRows(r.data || []));
+  }, [city, tick]);
+  if (rows === null) return <Center><Spinner /></Center>;
+  const total = rows.reduce((t, r) => t + Number(r.fare_to || 0) + Number(r.fare_back || 0), 0);
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-3"><h2 className="text-lg font-semibold">Bills you added</h2><span className="text-sm text-gray-600">{rows.length} · <b>{inr(total)}</b></span></div>
+      {rows.length === 0 && <div className="text-center text-gray-500 py-16">You haven't added any bills yet.</div>}
+      <div className="space-y-2">{rows.map(r => (
+        <div key={r.id} className="bg-white border border-gray-200 rounded-xl p-3">
+          <div className="flex justify-between text-sm"><span className="font-semibold">{r.staff_name} · {r.customer_name || "—"}</span><span className="text-gray-500">{niceDate(r.expense_date)}</span></div>
+          <div className="text-sm text-gray-700 mt-0.5">To {inr(r.fare_to)} · Back {inr(r.fare_back)} · <b>{inr(Number(r.fare_to) + Number(r.fare_back))}</b> · {r.payment_method} · <span className="capitalize">{r.review_status || "pending"}</span>{r.paid_on ? ` · paid ${niceDate(r.paid_on)}` : ""}</div>
+          {r.note && <div className="text-xs text-gray-500 mt-0.5">{r.note}</div>}
+        </div>))}</div>
+    </div>
+  );
+}
+
 function FileField({ label, files, setFiles, hint }) {
   const [previews, setPreviews] = useState([]);
   useEffect(() => {
@@ -879,8 +1018,8 @@ function ExpenseForm({ staff, date, row, onClose, onSaved }) {
       const { error } = await supabase.from("travel_expenses").insert({
         staff_id: staff.id, staff_name: staff.name, expense_date: date, city: staff.city,
         meeting_id: row.kind === "meeting" ? row.id : null, visit_id: row.kind === "visit" ? row.id : null,
-        customer_name: row.customer, fare_to: a || 0, invoice_to_path: pTo[0] || null, invoice_to_paths: pTo, fare_back: b || 0, invoice_back_path: pBack[0] || null, invoice_back_paths: pBack,
-        payment_method: method, note: note || null,
+        customer_name: row.customerName || row.customer, fare_to: a || 0, invoice_to_path: pTo[0] || null, invoice_to_paths: pTo, fare_back: b || 0, invoice_back_path: pBack[0] || null, invoice_back_paths: pBack,
+        payment_method: method, note: note || null, submitted_by: staff.submitted_by || null,
       });
       if (error) throw new Error(error.message);
       onSaved();
