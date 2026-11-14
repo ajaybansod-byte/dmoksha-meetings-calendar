@@ -827,6 +827,7 @@ function OpsHome({ staff: me }) {
   const [pwOpen, setPwOpen] = useState(false);
   const [team, setTeam] = useState([]);
   const [tick, setTick] = useState(0);
+  const [pendFrom, setPendFrom] = useState("2026-01-01");   // Bills pending: default = everything so far
   useEffect(() => { supabase.from("staff").select("id,name,role,city,mobile,active").eq("role", "support").then(r => setTeam((r.data || []).filter(s => s.active !== false))); }, []);
   const today = toISO(new Date()), tomorrow = addDays(today, 1), yesterday = addDays(today, -1);
   return (
@@ -852,7 +853,13 @@ function OpsHome({ staff: me }) {
       </header>
       <main className="px-4 py-4">
         {tab === "visits" && <OpsVisits me={me} team={team} city={city} from={date} to={date} tick={tick} onChanged={() => setTick(t => t + 1)} />}
-        {tab === "pending" && <OpsVisits me={me} team={team} city={city} from={today.slice(0, 8) + "01"} to={today} pendingOnly tick={tick} onChanged={() => setTick(t => t + 1)} />}
+        {tab === "pending" && <>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {[["2026-01-01", "All previous"], [today.slice(0, 8) + "01", "This month"], [addDays(today, -7), "Last 7 days"]].map(([d, l]) => (
+              <button key={l} onClick={() => setPendFrom(d)} className={`px-3 py-1.5 rounded-full text-sm font-medium border ${pendFrom === d ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300"}`}>{l}</button>))}
+          </div>
+          <OpsVisits me={me} team={team} city={city} from={pendFrom} to={today} pendingOnly tick={tick} onChanged={() => setTick(t => t + 1)} />
+        </>}
         {tab === "submitted" && <OpsSubmitted me={me} city={city} tick={tick} />}
       </main>
       <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 pb-safe z-30">
@@ -880,7 +887,8 @@ function OpsVisits({ me, team, city, from, to, pendingOnly, tick, onChanged }) {
       const v = await q;
       const visits = (v.data || []).filter(x => x.visit_type).sort((a, b) => b.visit_date.localeCompare(a.visit_date) || (timeToMinutes(a.timing) ?? 9999) - (timeToMinutes(b.timing) ?? 9999));
       const ids = visits.map(x => x.id);
-      const e = ids.length ? await supabase.from("travel_expenses").select("id,visit_id,staff_name,fare_to,fare_back,payment_method,review_status,submitted_by").in("visit_id", ids) : { data: [] };
+      const chunks = []; for (let i = 0; i < ids.length; i += 150) chunks.push(ids.slice(i, i + 150));
+      const e = { data: (await Promise.all(chunks.map(c => supabase.from("travel_expenses").select("id,visit_id,staff_name,fare_to,fare_back,payment_method,review_status,submitted_by").in("visit_id", c)))).flatMap(r => r.data || []) };
       if (!alive) return;
       const bm = {}; (e.data || []).forEach(b => (bm[b.visit_id] = bm[b.visit_id] || []).push(b));
       setBills(bm); setRows(visits);
@@ -895,11 +903,11 @@ function OpsVisits({ me, team, city, from, to, pendingOnly, tick, onChanged }) {
   return (
     <div>
       <div className="flex items-center justify-between gap-2 mb-3">
-        <h2 className="text-lg font-semibold">{pendingOnly ? "This month · no bill yet" : niceDate(from)}</h2>
+        <h2 className="text-lg font-semibold">{pendingOnly ? (from <= "2026-01-01" ? "All previous visits · no bill yet" : `Since ${niceDate(from)} · no bill yet`) : niceDate(from)}</h2>
         <select value={who} onChange={e => setWho(e.target.value)} className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm"><option value="">All staff</option>{names.map(n => <option key={n}>{n}</option>)}</select>
       </div>
       <div className="text-xs text-gray-500 mb-3">{list.length} visit{list.length === 1 ? "" : "s"} · installations, collections, measurements and other field visits (meetings not included)</div>
-      {list.length === 0 && <div className="text-center text-gray-500 py-16">{pendingOnly ? "✓ Every visit this month has a travel bill." : "No field visits on this day."}</div>}
+      {list.length === 0 && <div className="text-center text-gray-500 py-16">{pendingOnly ? "✓ Every visit in this period has a travel bill." : "No field visits on this day."}</div>}
       <div className="space-y-3">
         {list.map(v => { const bs = bills[v.id] || []; const p = personFor(v.support_name); return (
           <div key={v.id} className={`bg-white border rounded-xl shadow-sm p-4 ${bs.length ? "border-green-300" : "border-gray-200"}`}>
