@@ -2356,6 +2356,83 @@ const OUTCOME_UI = {
   rescheduled: ["Rescheduled",          "bg-blue-100 text-blue-800 border-blue-300"],
 };
 const ISSUE_TYPES = ["Size – short", "Size – long", "Width issue", "Stitching", "Fabric defect", "Wrong fabric / shade", "Hardware / track", "Blind mechanism", "Lining", "Other"];
+// GUIDED ALTERATION ISSUES (Ajay 15 Nov 2026). Amit picks what is wrong, answers
+// a few questions, and the FIX is written from the answers (he can change it).
+// The client's designer then approves / changes / rejects each issue in the
+// support-team app; the factory sees the case at once, tagged until approved.
+const ALT_KINDS = [
+  { k: "height", label: "Height", qs: [
+      { id: "dir", label: "Too short or too long?", opts: ["Short", "Long"] },
+      { id: "inch", label: "By how many inches?", num: true },
+      { id: "side", label: "Where?", opts: ["Whole curtain", "Left side", "Right side"] }],
+    summary: a => `Height – ${(a.dir || "").toLowerCase()} by ${a.inch}"${a.side && a.side !== "Whole curtain" ? ` (${a.side.toLowerCase()})` : ""}`,
+    fix: a => { const n = Number(a.inch); const w = a.side && a.side !== "Whole curtain" ? ` on the ${a.side.toLowerCase()}` : "";
+      return a.dir === "Long" ? `Shorten by ${n}"${w} — re-hem the bottom`
+        : n <= 3 ? `Lengthen by ${n}"${w} — let down the hem`
+        : `Lengthen by ${n}"${w} — add a matching band at the bottom or remake the panel (designer to choose)`; } },
+  { k: "width", label: "Width", qs: [
+      { id: "dir", label: "Too narrow or too wide?", opts: ["Too narrow (gap at the centre / sides)", "Too wide (bunching)"] },
+      { id: "inch", label: "By how many inches?", num: true }],
+    summary: a => `Width – ${/narrow/i.test(a.dir || "") ? "narrow" : "wide"} by ${a.inch}"`,
+    fix: a => /narrow/i.test(a.dir || "") ? `Add ${a.inch}" of width — extra fabric joined, or re-pleat with smaller gaps` : `Reduce width by ${a.inch}" — take in, or fewer pleats` },
+  { k: "hem", label: "Hem not level", qs: [
+      { id: "side", label: "Which side hangs lower?", opts: ["Left side", "Right side", "Centre"] },
+      { id: "inch", label: "By how many inches?", num: true }],
+    summary: a => `Hem not level – ${(a.side || "").toLowerCase()} lower by ${a.inch}"`,
+    fix: a => `Re-level the hem — raise the ${(a.side || "").toLowerCase()} by ${a.inch}"` },
+  { k: "pleats", label: "Pleats", qs: [
+      { id: "what", label: "What's wrong with the pleats?", opts: ["Uneven spacing", "Wrong pleat style", "Too few pleats", "Too many pleats"] }],
+    summary: a => `Pleats – ${(a.what || "").toLowerCase()}`,
+    fix: a => a.what === "Wrong pleat style" ? "Re-pleat in the pleat style ordered" : `Re-pleat — correct the ${(a.what || "").toLowerCase()}` },
+  { k: "stitching", label: "Stitching", qs: [
+      { id: "what", label: "What's wrong?", opts: ["Loose seam", "Visible stitch", "Puckering", "Loose thread"] },
+      { id: "where", label: "Where on the curtain? (optional)", text: true, optional: true }],
+    summary: a => `Stitching – ${(a.what || "").toLowerCase()}${a.where ? ` (${a.where})` : ""}`,
+    fix: a => `Re-stitch the ${(a.what || "").toLowerCase()}${a.where ? ` at ${a.where}` : ""}` },
+  { k: "fabric", label: "Fabric", qs: [
+      { id: "what", label: "What's wrong with the fabric?", opts: ["Wrong fabric / shade", "Shade mismatch between panels", "Tear", "Hole", "Stain"] }],
+    summary: a => `Fabric – ${(a.what || "").toLowerCase()}`,
+    fix: a => a.what === "Stain" ? "Clean the stain (replace the panel if it does not come out)" : "Replace the panel — new fabric needed" },
+  { k: "lining", label: "Lining", qs: [
+      { id: "what", label: "What's wrong with the lining?", opts: ["Showing at the bottom", "Showing at the sides", "Lining too long", "Lining too short", "Wrong lining"] },
+      { id: "inch", label: "By how many inches?", num: true, when: a => ["Showing at the bottom", "Lining too long", "Lining too short"].includes(a.what) }],
+    summary: a => `Lining – ${(a.what || "").toLowerCase()}${a.inch ? ` by ${a.inch}"` : ""}`,
+    fix: a => a.what === "Showing at the sides" ? "Re-attach the lining at the sides"
+      : a.what === "Wrong lining" ? "Replace the lining with the one ordered"
+      : a.what === "Lining too short" ? `Lengthen the lining by ${a.inch}" (replace if there is no hem to let down)`
+      : `Shorten the lining by ${a.inch}"` },
+  { k: "hooks", label: "Hooks / runners", qs: [
+      { id: "what", label: "What's wrong?", opts: ["Hooks missing", "Wrong number of hooks", "Wrong hook / runner type"] },
+      { id: "count", label: "How many?", num: true, when: a => a.what !== "Wrong hook / runner type" }],
+    summary: a => `Hooks – ${(a.what || "").toLowerCase()}${a.count ? ` (${a.count})` : ""}`,
+    fix: a => a.what === "Wrong hook / runner type" ? "Replace with the right hooks / runners" : `Fit ${a.count} hook${Number(a.count) === 1 ? "" : "s"}` },
+  { k: "tieback", label: "Tie-back", qs: [
+      { id: "what", label: "What's wrong?", opts: ["Tie-back missing", "Wrong height", "Wrong size"] }],
+    summary: a => `Tie-back – ${(a.what || "").toLowerCase()}`,
+    fix: a => a.what === "Tie-back missing" ? "Make the tie-back" : a.what === "Wrong height" ? "Move the tie-back to the right height" : "Remake the tie-back to the right size" },
+  { k: "trim", label: "Trim", qs: [
+      { id: "what", label: "What's wrong?", opts: ["Trim missing", "Wrong trim", "Trim coming off"] }],
+    summary: a => `Trim – ${(a.what || "").toLowerCase()}`,
+    fix: a => a.what === "Trim missing" ? "Attach the trim" : a.what === "Wrong trim" ? "Replace with the trim ordered" : "Re-attach the trim" },
+  { k: "weights", label: "Weights", qs: [
+      { id: "what", label: "What's wrong?", opts: ["Weights missing", "More weight needed"] }],
+    summary: a => `Weights – ${(a.what || "").toLowerCase()}`,
+    fix: () => "Add weights in the bottom hem" },
+  { k: "missing", label: "Missing panel", qs: [
+      { id: "count", label: "How many panels are missing?", num: true }],
+    summary: a => `Missing panel – ${a.count}`,
+    fix: a => `Make ${a.count} missing panel${Number(a.count) === 1 ? "" : "s"}` },
+  { k: "other", label: "Other", qs: [], summary: () => "Other", fix: () => "" },
+];
+const altKind = (k) => ALT_KINDS.find(x => x.k === k);
+const altQs = (it) => { const kd = altKind(it.kind); return kd ? kd.qs.filter(q => !q.when || q.when(it.ans || {})) : []; };
+const altMissing = (it) => {
+  if (!it.kind) return "pick what is wrong";
+  for (const q of altQs(it)) { const v = (it.ans || {})[q.id]; if (!q.optional && (v == null || String(v).trim() === "" || (q.num && !(Number(v) > 0)))) return q.label.toLowerCase(); }
+  if (!String(it.fix || "").trim()) return "the fix";
+  return null;
+};
+const newAltIssue = () => ({ item_key: "", kind: "", ans: {}, fix: "", fixEdited: false, description: "", files: [] });
 const COST_TYPES = ["Fabric / lining ordered", "Hardware", "Restitching", "Manpower", "Service (roman / roller blind)", "Other"];
 const PAID_FROM = ["Petty cash (staff)", "Company / vendor payment", "Factory (no cash)"];
 const CASE_UI = { open: ["Open", "bg-red-100 text-red-700"], in_progress: ["In progress", "bg-amber-100 text-amber-800"], resolved: ["Resolved", "bg-green-100 text-green-800"], cancelled: ["Cancelled", "bg-gray-100 text-gray-600"] };
@@ -2630,7 +2707,18 @@ function OutcomeModal({ visit, card, data, user, city, onClose, onSaved, onSched
   const [outcome, setOutcome] = useState(rev?.outcome || null);
   const [done, setDone] = useState(() => { const m = {}; (rev?.installed_items || []).forEach(i => m[i.key] = true); return m; });
   const [note, setNote] = useState(rev?.note || "");
-  const [issues, setIssues] = useState([{ item_key: "", issue_type: ISSUE_TYPES[0], description: "", files: [] }]);
+  const [issues, setIssues] = useState([newAltIssue()]);
+  const [costBearer, setCostBearer] = useState("");   // Amit decides (15 Nov 2026): 'dmoksha' | 'customer'
+  const designerName = card.order?.designer_name || visit.stylist || "";
+  // Answer a question / pick a kind → re-write the fix unless Amit typed his own.
+  const setIssue = (idx, patch) => setIssues(a => a.map((x, j) => {
+    if (j !== idx) return x;
+    const n = { ...x, ...patch };
+    if (patch.kind !== undefined && patch.kind !== x.kind) { n.ans = {}; n.fixEdited = false; n.fix = ""; }
+    const kd = altKind(n.kind);
+    if (kd && !n.fixEdited && !patch.hasOwnProperty("fix")) { const ok = altQs(n).every(q => q.optional || (n.ans[q.id] != null && String(n.ans[q.id]).trim() !== "")); n.fix = ok ? kd.fix(n.ans) : ""; }
+    return n;
+  }));
   const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
   const who = user?.full_name || user?.email || "Operations";
   const remaining = planned.filter(i => !done[i.key]);
@@ -2640,7 +2728,11 @@ function OutcomeModal({ visit, card, data, user, city, onClose, onSaved, onSched
   const save = async (then) => {
     if (!outcome) { setErr("Choose what happened at this visit."); return; }
     if (outcome === "partial" && isInstall && planned.length && Object.values(done).filter(Boolean).length === 0) { setErr("Tick at least one curtain that was installed."); return; }
-    if (outcome === "alteration" && issues.some(i => !i.item_key && !i.description.trim())) { setErr("Each issue needs a curtain or a description."); return; }
+    if (outcome === "alteration") {
+      for (let n = 0; n < issues.length; n++) { const m = altMissing(issues[n]); if (m) { setErr(`Issue ${n + 1}: answer ${m}.`); return; } }
+      if (issues.some(i => i.kind === "other" && !i.description.trim())) { setErr("Describe the issue marked Other."); return; }
+      if (!costBearer) { setErr("Choose whose cost this alteration is."); return; }
+    }
     setBusy(true); setErr(null);
     try {
       const row = { visit_id: visit.id, order_id: card.order?.id || visit.order_id || null, client_id: card.clientId || null, outcome, note: note || null, marked_by: who, marked_at: new Date().toISOString(), updated_at: new Date().toISOString(),
@@ -2652,13 +2744,18 @@ function OutcomeModal({ visit, card, data, user, city, onClose, onSaved, onSched
       let caseId = null;
       if (outcome === "alteration") {
         const o = card.order;
-        const { data: cs, error: ce } = await supabase.from("alteration_cases").insert({ order_id: o?.id || visit.order_id || null, client_id: card.clientId || null, customer_name: card.customer, customer_mobile: o?.customer_mobile || visit.mobile || null, address: card.address || null, city, raised_from_visit_id: visit.id, raised_by: who, note: note || null }).select("id").single();
+        // Designer approval (15 Nov 2026): the client's designer approves each issue; the factory sees it at once.
+        const { data: cs, error: ce } = await supabase.from("alteration_cases").insert({ order_id: o?.id || visit.order_id || null, client_id: card.clientId || null, customer_name: card.customer, customer_mobile: o?.customer_mobile || visit.mobile || null, address: card.address || null, city, raised_from_visit_id: visit.id, raised_by: who, note: note || null,
+          designer_name: designerName || null, cost_bearer: costBearer, needs_approval: !!designerName }).select("id").single();
         if (ce) throw new Error(ce.message);
         caseId = cs.id;
         for (const it of issues) {
           const item = planned.find(p => p.key === it.item_key);
+          const kd = altKind(it.kind);
           const photos = it.files.length ? await uploadOfficeFiles(it.files, `alterations/${caseId}`) : [];
-          const { error: ie } = await supabase.from("alteration_issues").insert({ case_id: caseId, item_key: it.item_key || null, item_label: item ? item.label : (it.item_key ? it.item_key : "General"), layer: item?.layer || null, issue_type: it.issue_type, description: it.description || null, photos });
+          const { error: ie } = await supabase.from("alteration_issues").insert({ case_id: caseId, item_key: it.item_key || null, item_label: item ? item.label : (it.item_key ? it.item_key : "General"), layer: item?.layer || null,
+            issue_type: kd ? kd.summary(it.ans) : "Other", description: it.description || null, photos,
+            problem: { kind: it.kind, answers: it.ans }, fix: it.fix.trim(), fix_default: kd ? kd.fix(it.ans) : null, designer_status: designerName ? "pending" : null });
           if (ie) throw new Error(ie.message);
         }
       }
@@ -2704,25 +2801,34 @@ function OutcomeModal({ visit, card, data, user, city, onClose, onSaved, onSched
           {outcome === "alteration" && (
             <div className="rounded-xl border border-red-200 p-3 space-y-3">
               <div className="text-xs uppercase tracking-wider text-gray-600 font-semibold">What went wrong</div>
-              {issues.map((it, idx) => (
+              {issues.map((it, idx) => { const kd = altKind(it.kind); const chip = (on) => `px-3 py-1.5 rounded-full border text-sm ${on ? "bg-red-600 border-red-600 text-white" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"}`; return (
                 <div key={idx} className="rounded-lg bg-red-50/50 border border-red-100 p-3 space-y-2">
-                  <div className="grid sm:grid-cols-2 gap-2">
-                    <label className="block"><span className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Room / window / curtain</span>
-                      <select value={it.item_key} onChange={e => setIssues(a => a.map((x, j) => j === idx ? { ...x, item_key: e.target.value } : x))} className={inp}>
-                        <option value="">— general / not a specific curtain —</option>
-                        {planned.map(p => <option key={p.key} value={p.key}>{p.label} · {p.layer}</option>)}
-                      </select></label>
-                    <label className="block"><span className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Issue type</span>
-                      <select value={it.issue_type} onChange={e => setIssues(a => a.map((x, j) => j === idx ? { ...x, issue_type: e.target.value } : x))} className={inp}>{ISSUE_TYPES.map(t => <option key={t}>{t}</option>)}</select></label>
-                  </div>
-                  <label className="block"><span className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Describe the issue</span>
-                    <textarea rows="2" value={it.description} onChange={e => setIssues(a => a.map((x, j) => j === idx ? { ...x, description: e.target.value } : x))} className={inp} placeholder="e.g. Main curtain 2 inch short on the left, lining showing at bottom" /></label>
+                  <label className="block"><span className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Issue {idx + 1} · Room / window / curtain</span>
+                    <select value={it.item_key} onChange={e => setIssue(idx, { item_key: e.target.value })} className={inp}>
+                      <option value="">— general / not a specific curtain —</option>
+                      {planned.map(p => <option key={p.key} value={p.key}>{p.label} · {p.layer}</option>)}
+                    </select></label>
+                  <div><span className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">What's wrong?</span>
+                    <div className="flex flex-wrap gap-1.5 mt-1">{ALT_KINDS.map(k => <button type="button" key={k.k} onClick={() => setIssue(idx, { kind: k.k })} className={chip(it.kind === k.k)}>{k.label}</button>)}</div></div>
+                  {kd && altQs(it).map(q => (
+                    <div key={q.id}><span className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">{q.label}</span>
+                      {q.opts ? <div className="flex flex-wrap gap-1.5 mt-1">{q.opts.map(o => <button type="button" key={o} onClick={() => setIssue(idx, { ans: { ...it.ans, [q.id]: o } })} className={chip(it.ans[q.id] === o)}>{o}</button>)}</div>
+                        : <input type={q.num ? "number" : "text"} min="0" step={q.num ? "0.25" : undefined} inputMode={q.num ? "decimal" : undefined} value={it.ans[q.id] ?? ""} onChange={e => setIssue(idx, { ans: { ...it.ans, [q.id]: e.target.value } })} className={inp} placeholder={q.num ? (q.id === "inch" ? "inches, e.g. 1" : "number") : ""} style={q.num ? { maxWidth: 160 } : undefined} />}
+                    </div>))}
+                  {kd && <label className="block"><span className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Fix {it.kind !== "other" && !it.fixEdited ? "(filled in from the answers — change it if needed)" : ""}</span>
+                    <textarea rows="2" value={it.fix} onChange={e => setIssue(idx, { fix: e.target.value, fixEdited: true })} className={`${inp} ${it.fix ? "bg-green-50 border-green-300" : ""}`} placeholder={it.kind === "other" ? "What the factory should do" : "Answer the questions above"} />
+                    {it.fixEdited && it.kind !== "other" && <button type="button" onClick={() => setIssue(idx, { fixEdited: false, fix: kd.fix(it.ans) })} className="text-xs text-blue-600 mt-1">Use the suggested fix again</button>}</label>}
+                  {kd && <label className="block"><span className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">{it.kind === "other" ? "Describe the issue" : "More details (optional)"}</span>
+                    <textarea rows="2" value={it.description} onChange={e => setIssue(idx, { description: e.target.value })} className={inp} placeholder="e.g. customer wants it just above the floor" /></label>}
                   <div className="flex items-center justify-between gap-2"><PhotoPick files={it.files} setFiles={(fn) => setIssues(a => a.map((x, j) => j === idx ? { ...x, files: typeof fn === "function" ? fn(x.files) : fn } : x))} />
                     {issues.length > 1 && <button type="button" onClick={() => setIssues(a => a.filter((_, j) => j !== idx))} className="text-xs text-red-600">Remove</button>}</div>
                 </div>
-              ))}
-              <button type="button" onClick={() => setIssues(a => [...a, { item_key: "", issue_type: ISSUE_TYPES[0], description: "", files: [] }])} className="text-sm text-blue-600 font-medium">+ Add another issue</button>
-              <div className="text-xs text-gray-600">This creates an alteration case that the factory / production team sees in the ERP. You can add costs (fabric, restitching, manpower…) on the case afterwards.</div>
+              ); })}
+              <button type="button" onClick={() => setIssues(a => [...a, newAltIssue()])} className="text-sm text-blue-600 font-medium">+ Add another issue</button>
+              <div><span className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">Whose cost?</span>
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {[["dmoksha", "Our mistake (free for the customer)"], ["customer", "Customer's change (chargeable)"]].map(([v, l]) => <button type="button" key={v} onClick={() => setCostBearer(v)} className={`px-3 py-1.5 rounded-full border text-sm ${costBearer === v ? "bg-gray-900 border-gray-900 text-white" : "bg-white border-gray-300 text-gray-700"}`}>{l}</button>)}</div></div>
+              <div className="text-xs text-gray-600">{designerName ? <>Goes to <b>{designerName}</b> (the client's designer) to approve. The factory sees the case at once, marked "not approved by designer yet" until they decide.</> : <>No designer on this order — the case goes to the factory without designer approval.</>} You can add costs (fabric, restitching, manpower…) on the case afterwards.</div>
             </div>
           )}
 
@@ -2810,10 +2916,16 @@ function AlterationCaseModal({ caseId, data, edit, user, onClose, onChanged, onS
                   {edit && <input type="checkbox" checked={i.status === "resolved"} onChange={() => toggleIssue(i)} className="mt-1 w-5 h-5 accent-green-600" title="Mark resolved" />}
                   <div className="min-w-0 flex-1">
                     <div className={`text-sm font-semibold ${i.status === "resolved" ? "line-through text-gray-400" : "text-gray-900"}`}>{i.item_label}{i.layer ? ` · ${i.layer}` : ""} <span className="text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5 ml-1">{i.issue_type}</span></div>
+                    {i.fix && <div className="text-sm text-green-800 mt-0.5"><b>Fix:</b> {i.fix}</div>}
                     {i.description && <div className="text-sm text-gray-700 mt-0.5">{i.description}</div>}
+                    {i.designer_status && <div className={`text-xs mt-1 font-medium ${i.designer_status === "pending" ? "text-amber-700" : i.designer_status === "rejected" ? "text-red-700" : "text-green-700"}`}>
+                      {i.designer_status === "pending" ? `Waiting for ${cs.designer_name || "the designer"} to approve`
+                        : i.designer_status === "rejected" ? `Rejected by ${i.decided_by}: ${i.designer_note || ""} — talk to the designer and re-raise if needed`
+                        : `${i.designer_status === "changed" ? "Fix changed" : "Approved"} by ${i.decided_by}${i.designer_note ? ` · ${i.designer_note}` : ""}`}</div>}
                     {(i.photos || []).length > 0 && <div className="mt-1"><Thumbs paths={i.photos} /></div>}
                   </div>
                 </div>))}
+              {cs.cost_bearer && <div className="text-xs text-gray-600">Cost: <b>{cs.cost_bearer === "customer" ? "customer's change (chargeable)" : "our mistake (free for the customer)"}</b></div>}
               {newIssue && (
                 <div className="rounded-lg border border-red-200 bg-red-50/40 p-3 space-y-2">
                   <div className="grid sm:grid-cols-2 gap-2">

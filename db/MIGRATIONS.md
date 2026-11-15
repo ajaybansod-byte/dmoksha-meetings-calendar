@@ -22,5 +22,6 @@ Database → Migrations (table `supabase_migrations.schema_migrations`), searcha
 | 2026-10-31 | `installations_alterations` | Outcomes, alteration cases/issues/costs, ERP view |
 | 2026-11-02 | `factory_dispatch`, `staff_role_factory` | Factory per-item dispatch approval, returns, factory role |
 | 2026-11-12 | `ops_admin_portal` | `ops` role, `submitted_by` on bills, Amit's ops profile |
+| 2026-11-15 | `116_alteration_designer_approval` | Alteration issues: guided answers (`problem`), `fix`, designer decision (`designer_status`, note, by, at); cases: `designer_name`, `cost_bearer`, `needs_approval`; designer read policies; `designer_decide_alteration()` RPC; ERP view gets fix / approval columns. Also ERP `db/migrations/116_*.sql`. |
 
 Not stored as migrations (data only): staff logins created for designers, support, factory and ops; Ajay's ops profile (2026-11-14).
