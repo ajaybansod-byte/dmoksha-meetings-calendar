@@ -2406,6 +2406,19 @@ const ALT_KINDS = [
       { id: "count", label: "How many?", num: true, when: a => a.what !== "Wrong hook / runner type" }],
     summary: a => `Hooks – ${(a.what || "").toLowerCase()}${a.count ? ` (${a.count})` : ""}`,
     fix: a => a.what === "Wrong hook / runner type" ? "Replace with the right hooks / runners" : `Fit ${a.count} hook${Number(a.count) === 1 ? "" : "s"}` },
+  { k: "hardware", label: "Hardware", qs: [
+      { id: "what", label: "What's wrong with the hardware?", opts: ["Track not running smoothly", "Track bent / damaged", "Track too short", "Wrong track / rod", "Bracket / clamp loose", "Motor / remote not working", "Rod issue"] },
+      { id: "inch", label: "Short by how many inches?", num: true, when: a => a.what === "Track too short" }],
+    summary: a => `Hardware – ${(a.what || "").toLowerCase()}${a.inch ? ` by ${a.inch}"` : ""}`,
+    fix: a => ({
+      "Track not running smoothly": "Service the track — clean, re-align and replace faulty runners",
+      "Track bent / damaged": "Replace the track",
+      "Track too short": `Replace with a track ${a.inch}" longer`,
+      "Wrong track / rod": "Replace with the track / rod ordered",
+      "Bracket / clamp loose": "Re-fix the brackets / clamps",
+      "Motor / remote not working": "Check and repair or replace the motor / remote",
+      "Rod issue": "Fix or replace the rod",
+    }[a.what] || "") },
   { k: "tieback", label: "Tie-back", qs: [
       { id: "what", label: "What's wrong?", opts: ["Tie-back missing", "Wrong height", "Wrong size"] }],
     summary: a => `Tie-back – ${(a.what || "").toLowerCase()}`,
