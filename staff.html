@@ -879,6 +879,9 @@ function OpsVisits({ me, team, city, from, to, pendingOnly, tick, onChanged }) {
   const [bills, setBills] = useState({});
   const [who, setWho] = useState("");
   const [form, setForm] = useState(null);   // { visit, person }
+  const [alt, setAlt] = useState({ cases: [], issues: {}, costs: {} });
+  const [costFor, setCostFor] = useState(null);   // alteration case to add a cost to
+  const casesFor = v => alt.cases.filter(c => (v.order_id && c.order_id === v.order_id) || c.raised_from_visit_id === v.id || (!c.order_id && v.client_id && c.client_id === v.client_id));
   useEffect(() => {
     let alive = true; setRows(null);
     (async () => {
@@ -891,6 +894,22 @@ function OpsVisits({ me, team, city, from, to, pendingOnly, tick, onChanged }) {
       const e = { data: (await Promise.all(chunks.map(c => supabase.from("travel_expenses").select("id,visit_id,staff_name,fare_to,fare_back,payment_method,review_status,submitted_by").in("visit_id", c)))).flatMap(r => r.data || []) };
       if (!alive) return;
       const bm = {}; (e.data || []).forEach(b => (bm[b.visit_id] = bm[b.visit_id] || []).push(b));
+      // Alteration cases linked to these visits (by order, client or the visit that raised them)
+      const orderIds = Array.from(new Set(visits.map(x => x.order_id).filter(Boolean)));
+      const clientIds = Array.from(new Set(visits.map(x => x.client_id).filter(Boolean)));
+      const ors = [];
+      if (orderIds.length) ors.push(`order_id.in.(${orderIds.join(",")})`);
+      if (clientIds.length) ors.push(`client_id.in.(${clientIds.map(c => `"${c}"`).join(",")})`);
+      if (ids.length && ids.length <= 150) ors.push(`raised_from_visit_id.in.(${ids.join(",")})`);
+      const cs = ors.length ? await supabase.from("alteration_cases").select("*").or(ors.join(",")).neq("status", "cancelled") : { data: [] };
+      const caseIds = (cs.data || []).map(c => c.id);
+      const [ci, cc] = caseIds.length ? await Promise.all([
+        supabase.from("alteration_issues").select("case_id,item_label,layer,issue_type,status").in("case_id", caseIds),
+        supabase.from("alteration_costs").select("*").in("case_id", caseIds).order("created_at"),
+      ]) : [{ data: [] }, { data: [] }];
+      if (!alive) return;
+      const grp = (arr) => arr.reduce((m, x) => ((m[x.case_id] = m[x.case_id] || []).push(x), m), {});
+      setAlt({ cases: cs.data || [], issues: grp(ci.data || []), costs: grp(cc.data || []) });
       setBills(bm); setRows(visits);
     })();
     return () => { alive = false; };
@@ -924,11 +943,19 @@ function OpsVisits({ me, team, city, from, to, pendingOnly, tick, onChanged }) {
               <div key={b.id} className="mt-2 text-sm text-green-800 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
                 ✓ {b.staff_name}: <b>{inr(Number(b.fare_to || 0) + Number(b.fare_back || 0))}</b> · {b.payment_method} · {b.review_status || "pending"}{b.submitted_by ? <span className="text-xs text-gray-600"> · added by {b.submitted_by}</span> : ""}
               </div>))}
+            {casesFor(v).map(c => { const iss = alt.issues[c.id] || []; const ks = alt.costs[c.id] || []; const tot = ks.reduce((t, k) => t + Number(k.amount || 0), 0); const live = c.status === "open" || c.status === "in_progress"; return (
+              <div key={c.id} className="mt-2 rounded-lg border border-red-200 bg-red-50/60 p-3">
+                <div className="flex items-center justify-between gap-2"><div className="text-sm font-semibold text-red-800">🧵 Alteration case #{c.case_no} <span className="text-[10px] font-semibold rounded px-1.5 py-0.5 bg-white border border-red-200 ml-1">{{ open: "Open", in_progress: "In progress", resolved: "Resolved" }[c.status] || c.status}</span></div><div className="text-sm font-bold text-red-700">{inr(tot)}</div></div>
+                {iss.length > 0 && <div className="text-xs text-gray-700 mt-1">{iss.map(i => `${i.item_label}${i.layer ? " " + i.layer : ""} – ${i.issue_type}${i.status === "resolved" ? " ✓" : ""}`).join(" · ")}</div>}
+                {ks.length > 0 && <div className="mt-1.5 space-y-0.5">{ks.map(k => <div key={k.id} className="text-xs text-gray-700 flex justify-between gap-2"><span>{k.cost_type}{k.metres ? ` (${k.metres} m)` : ""} · {k.paid_from}{k.vendor ? ` · ${k.vendor}` : ""}</span><b>{inr(k.amount)}</b></div>)}</div>}
+                {live && <button onClick={() => setCostFor({ c, v })} className="mt-2 w-full py-2 rounded-lg bg-red-600 text-white text-sm font-semibold">+ Add alteration cost</button>}
+              </div>); })}
             {v.support_name && (p
               ? <button onClick={() => setForm({ visit: v, person: p })} className={`mt-3 w-full py-2.5 rounded-lg text-sm font-semibold ${bs.length ? "bg-white border border-gray-300 text-gray-700" : "bg-blue-600 text-white"}`}>{bs.length ? `+ Add another bill for ${p.name}` : `Add travel expense for ${p.name}`}</button>
               : <div className="mt-2 text-xs text-amber-700">"{v.support_name}" has no staff profile — ask Ajay to create one.</div>)}
           </div>); })}
       </div>
+      {costFor && <OpsAltCostForm me={me} c={costFor.c} v={costFor.v} onClose={() => setCostFor(null)} onSaved={() => { setCostFor(null); onChanged(); }} />}
       {form && <ExpenseForm
         staff={{ id: form.person.id, name: form.person.name, city: form.person.city || form.visit.city, auth_user_id: me.auth_user_id, submitted_by: me.name }}
         date={form.visit.visit_date}
@@ -938,19 +965,93 @@ function OpsVisits({ me, team, city, from, to, pendingOnly, tick, onChanged }) {
   );
 }
 
+const ALT_COST_TYPES = ["Fabric / lining ordered", "Hardware", "Restitching", "Manpower", "Service (roman / roller blind)", "Other"];
+const ALT_PAID_FROM = ["Petty cash (staff)", "Company / vendor payment", "Factory (no cash)"];
+
+function OpsAltCostForm({ me, c, v, onClose, onSaved }) {
+  const [f, setF] = useState({ cost_type: ALT_COST_TYPES[0], amount: "", metres: "", paid_from: ALT_PAID_FROM[0], vendor: "", note: "" });
+  const [files, setFiles] = useState([]);
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
+  const set = k => e => setF(x => ({ ...x, [k]: e.target.value }));
+  const inp = "mt-1 w-full border border-gray-300 rounded-lg px-3 py-3 text-base";
+  const save = async (e) => {
+    e.preventDefault(); setErr(null);
+    if (!(Number(f.amount) > 0)) { setErr("Enter the amount."); return; }
+    setBusy(true);
+    try {
+      const paths = [];
+      for (const file of files) {
+        const blob = await compressImage(file); const ext = uploadExt(file, blob);
+        const path = `${me.auth_user_id}/alterations/${c.id}/${crypto.randomUUID()}.${ext}`;
+        const { error } = await supabase.storage.from("invoices").upload(path, blob, { contentType: blob.type || file.type || "image/jpeg" });
+        if (error) throw new Error("Upload failed: " + error.message);
+        paths.push(path);
+      }
+      const { error } = await supabase.from("alteration_costs").insert({ case_id: c.id, cost_type: f.cost_type, amount: Number(f.amount), metres: f.metres ? Number(f.metres) : null, paid_from: f.paid_from, vendor: f.vendor || null, note: f.note || null, bill_paths: paths, created_by: me.name });
+      if (error) throw new Error(error.message);
+      onSaved();
+    } catch (ex) { setErr(ex.message); setBusy(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-end" onClick={onClose}>
+      <form onSubmit={save} className="bg-white w-full max-h-[94vh] overflow-y-auto rounded-t-2xl" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+          <div><div className="font-semibold">Alteration cost · case #{c.case_no}</div><div className="text-xs text-gray-500">{c.customer_name}{c.client_id ? ` · ${c.client_id}` : ""}</div></div>
+          <button type="button" onClick={onClose} className="w-9 h-9 rounded-full hover:bg-gray-100 text-2xl leading-none text-gray-500">×</button>
+        </div>
+        {err && <div className="mx-4 mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">{err}</div>}
+        <div className="p-4 space-y-4">
+          <div><div className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-2">Cost type</div>
+            <div className="grid grid-cols-2 gap-2">{ALT_COST_TYPES.map(t => <button type="button" key={t} onClick={() => setF(x => ({ ...x, cost_type: t }))} className={`py-2.5 px-2 rounded-lg border text-sm font-semibold ${f.cost_type === t ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300"}`}>{t}</button>)}</div></div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block"><span className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Amount (₹)</span><input type="number" inputMode="decimal" min="0" value={f.amount} onChange={set("amount")} className={inp} /></label>
+            {f.cost_type.startsWith("Fabric") && <label className="block"><span className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Metres</span><input type="number" inputMode="decimal" min="0" step="0.1" value={f.metres} onChange={set("metres")} className={inp} /></label>}
+          </div>
+          <div><div className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-2">Paid from</div>
+            <div className="grid grid-cols-1 gap-2">{ALT_PAID_FROM.map(t => <button type="button" key={t} onClick={() => setF(x => ({ ...x, paid_from: t }))} className={`py-2.5 rounded-lg border text-sm font-semibold ${f.paid_from === t ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-700 border-gray-300"}`}>{t}</button>)}</div></div>
+          <label className="block"><span className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Vendor / paid to (optional)</span><input value={f.vendor} onChange={set("vendor")} className={inp} placeholder="e.g. tailor name, hardware shop" /></label>
+          <label className="block"><span className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Note (optional)</span><input value={f.note} onChange={set("note")} className={inp} /></label>
+          <FileField label="Bill photo" files={files} setFiles={setFiles} hint="📎 Tap to attach the bill" />
+        </div>
+        <div className="sticky bottom-0 bg-white border-t border-gray-200 p-4 pb-safe">
+          <button disabled={busy} className="w-full py-3 rounded-lg bg-red-600 text-white font-semibold disabled:opacity-60">{busy ? "Saving…" : `Add ${f.amount ? inr(f.amount) + " " : ""}cost`}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function OpsSubmitted({ me, city, tick }) {
   const [rows, setRows] = useState(null);
+  const [costs, setCosts] = useState([]);
   useEffect(() => {
     let q = supabase.from("travel_expenses").select("*").eq("submitted_by", me.name).order("expense_date", { ascending: false }).limit(300);
     if (city) q = q.eq("city", city);
     q.then(r => setRows(r.data || []));
+    supabase.from("alteration_costs").select("*, alteration_cases(case_no,customer_name,client_id,city)").eq("created_by", me.name).order("created_at", { ascending: false }).limit(300)
+      .then(r => setCosts((r.data || []).filter(k => !city || (k.alteration_cases?.city || "Mumbai") === city)));
   }, [city, tick]);
   if (rows === null) return <Center><Spinner /></Center>;
   const total = rows.reduce((t, r) => t + Number(r.fare_to || 0) + Number(r.fare_back || 0), 0);
+  const altTotal = costs.reduce((t, k) => t + Number(k.amount || 0), 0);
   return (
     <div>
-      <div className="flex items-baseline justify-between mb-3"><h2 className="text-lg font-semibold">Bills you added</h2><span className="text-sm text-gray-600">{rows.length} · <b>{inr(total)}</b></span></div>
-      {rows.length === 0 && <div className="text-center text-gray-500 py-16">You haven't added any bills yet.</div>}
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        <Stat label="Travel bills" v={inr(total)} />
+        <Stat label="Alteration costs" v={inr(altTotal)} />
+        <Stat label="Total added" v={inr(total + altTotal)} hi />
+      </div>
+      {costs.length > 0 && <>
+        <h2 className="text-base font-semibold mb-2">Alteration costs you added <span className="text-sm text-gray-500 font-normal">· {costs.length}</span></h2>
+        <div className="space-y-2 mb-5">{costs.map(k => (
+          <div key={k.id} className="bg-white border border-red-200 rounded-xl p-3">
+            <div className="flex justify-between text-sm"><span className="font-semibold">{k.alteration_cases?.customer_name || "—"} · case #{k.alteration_cases?.case_no}</span><span className="text-gray-500">{new Date(k.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span></div>
+            <div className="text-sm text-gray-700 mt-0.5">{k.cost_type}{k.metres ? ` (${k.metres} m)` : ""} · <b>{inr(k.amount)}</b> · {k.paid_from}{k.vendor ? ` · ${k.vendor}` : ""}</div>
+            {k.note && <div className="text-xs text-gray-500 mt-0.5">{k.note}</div>}
+          </div>))}</div>
+      </>}
+      <div className="flex items-baseline justify-between mb-2"><h2 className="text-base font-semibold">Travel bills you added</h2><span className="text-sm text-gray-600">{rows.length} · <b>{inr(total)}</b></span></div>
+      {rows.length === 0 && <div className="text-center text-gray-500 py-16">You haven't added any travel bills yet.</div>}
       <div className="space-y-2">{rows.map(r => (
         <div key={r.id} className="bg-white border border-gray-200 rounded-xl p-3">
           <div className="flex justify-between text-sm"><span className="font-semibold">{r.staff_name} · {r.customer_name || "—"}</span><span className="text-gray-500">{niceDate(r.expense_date)}</span></div>
