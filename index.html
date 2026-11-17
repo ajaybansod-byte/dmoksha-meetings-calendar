@@ -2631,6 +2631,9 @@ function InstallationCard({ c, data, edit, city, onOutcome, onOpenCase, onSchedu
             {c.clientId && <span className="font-mono text-xs text-blue-700">{c.clientId}</span>}
             {o && <span className="text-xs text-gray-500">Order #{o.id}</span>}
             <span className={`text-[11px] font-semibold rounded px-2 py-0.5 ${c.statusLabel[1]}`}>{c.statusLabel[0]}</span>
+            {c.cases.filter(x => x.status !== "cancelled").map(x => <span key={x.id} role="button" tabIndex={0} title={`Alteration job sheet for case #${x.case_no}`}
+              onClick={(e) => { e.stopPropagation(); downloadAlterationJobSheet(x, fileUrl); }} onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); downloadAlterationJobSheet(x, fileUrl); } }}
+              className="text-[11px] font-semibold rounded px-2 py-0.5 bg-gray-900 text-white cursor-pointer hover:bg-gray-700">📄 Alteration #{x.case_no} job sheet</span>)}
             {c.missingBills > 0 && <span className="text-[11px] font-semibold rounded px-2 py-0.5 bg-yellow-100 text-yellow-800">{c.missingBills} visit{c.missingBills === 1 ? "" : "s"} without travel bill</span>}
           </div>
           <div className="text-sm text-gray-600 mt-0.5 truncate">{c.address || "—"}{o?.designer_name ? ` · Stylist ${o.designer_name}` : c.visits[0].stylist ? ` · Stylist ${c.visits[0].stylist}` : ""}{o ? ` · ${o.windows_count ?? (o.windows || []).length} windows` : ""}</div>
@@ -2705,7 +2708,7 @@ function InstallationCard({ c, data, edit, city, onOutcome, onOpenCase, onSchedu
                     <div key={x.id} className="flex flex-wrap items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
                       <div className="text-sm"><span className="font-semibold">Case #{x.case_no}</span> <span className={`text-[11px] font-semibold rounded px-1.5 py-0.5 ml-1 ${cu[1]}`}>{cu[0]}</span>
                         <span className="text-gray-600 ml-2">{iss.length} issue{iss.length === 1 ? "" : "s"}: {iss.slice(0, 3).map(i => `${i.item_label} ${i.layer || ""} – ${i.issue_type}`).join("; ")}{iss.length > 3 ? "…" : ""}</span></div>
-                      <div className="flex items-center gap-3"><span className="text-sm font-semibold text-red-700">{inrA(cost)}</span><button onClick={() => onOpenCase(x.id)} className="px-3 py-1.5 rounded-md bg-white border border-gray-300 text-xs font-semibold text-gray-700">{edit ? "Open case" : "View"}</button></div>
+                      <div className="flex items-center gap-3"><span className="text-sm font-semibold text-red-700">{inrA(cost)}</span><button onClick={() => downloadAlterationJobSheet(x, fileUrl)} className="px-3 py-1.5 rounded-md bg-gray-900 text-white text-xs font-semibold">📄 Job sheet</button><button onClick={() => onOpenCase(x.id)} className="px-3 py-1.5 rounded-md bg-white border border-gray-300 text-xs font-semibold text-gray-700">{edit ? "Open case" : "View"}</button></div>
                     </div>);
                 })}
               </div>
