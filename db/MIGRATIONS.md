@@ -24,5 +24,6 @@ Database → Migrations (table `supabase_migrations.schema_migrations`), searcha
 | 2026-11-12 | `ops_admin_portal` | `ops` role, `submitted_by` on bills, Amit's ops profile |
 | 2026-11-15 | `116_alteration_designer_approval` | Alteration issues: guided answers (`problem`), `fix`, designer decision (`designer_status`, note, by, at); cases: `designer_name`, `cost_bearer`, `needs_approval`; designer read policies; `designer_decide_alteration()` RPC; ERP view gets fix / approval columns. Also ERP `db/migrations/116_*.sql`. |
 | 2026-11-17 | `119_measure_request_assign_on_calendar` | Partner measurement requests arrive unassigned; when the office sets `field_visits.support_name`, trigger `trg_sync_measure_request_staff` copies the support person onto `hl_measure_requests` (staff_id / staff_name now nullable). Also ERP `db/migrations/119_*.sql`. |
+| 2026-11-17 | `120_measure_request_visit_removable` | Removing a measurement visit on the calendar now works: a waiting partner request is cancelled (`trg_cancel_measure_request_on_visit_delete`) and the link is set null (FK `on delete set null`). Also ERP `db/migrations/120_*.sql`. |
 
 Not stored as migrations (data only): staff logins created for designers, support, factory and ops; Ajay's ops profile (2026-11-14). Regan moved from `support` to `ops` (2026-11-17).
