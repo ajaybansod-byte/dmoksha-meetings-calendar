@@ -790,6 +790,126 @@ function FactoryReturns({ staff, date }) {
 //   Each issue: Approve / Change fix / Reject. RLS shows only her own
 //   clients' cases; decisions go through designer_decide_alteration().
 // =========================================================
+// =========================================================
+//   Alteration job sheet (Ajay 17 Nov 2026) — one printable A4 page per case.
+//   Built fresh from the latest designer decisions + the order; opened in a new
+//   tab and printed / saved as PDF. Same code in index.html and staff.html.
+// =========================================================
+function altOrderPanel(order, key) {
+  const m = /^w(\d+)-(main|sheer|blind)$/.exec(key || ""); if (!m || !order) return null;
+  const w = (order.windows || [])[Number(m[1])]; if (!w) return null;
+  const p = m[2] === "blind" ? (w.blind || {}) : ((w.panels || {})[m[2]] || {});
+  return { w, p, layer: m[2] };
+}
+function altSizeNow(order, key, dim) {
+  const x = altOrderPanel(order, key); if (!x) return null;
+  const v = dim === "width" ? x.p.final_curtain_width : x.p.final_curtain_height;
+  return v != null && v !== "" && !isNaN(Number(v)) ? Number(v) : null;
+}
+const altIn = (n) => (n == null || n === "" || isNaN(Number(n))) ? "—" : `${Number(n).toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1")}"`;
+function altSizeVerb(dim, now, nw) {
+  if (now == null || nw == null) return "";
+  const d = Number(nw) - Number(now); if (d === 0) return "no change";
+  return dim === "width" ? (d < 0 ? "reduce width" : "add width") : (d < 0 ? "shorten" : "lengthen");
+}
+function openAlterationJobSheet(win, cs, issues, order, photoUrl) {
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const now = new Date();
+  const stamp = now.toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+  const live = issues.filter(i => i.designer_status !== "rejected");
+  const rej = issues.filter(i => i.designer_status === "rejected");
+  const pending = issues.some(i => i.designer_status === "pending");
+  const decided = issues.filter(i => i.decided_at).sort((a, b) => String(b.decided_at).localeCompare(String(a.decided_at)))[0];
+  const approval = pending ? `<span class="red"><b>Waiting for designer</b></span>`
+    : decided ? `Approved by <b>${esc(decided.decided_by)}</b> · ${new Date(decided.decided_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : "No designer approval needed";
+  const fabricLine = (i) => {
+    const x = altOrderPanel(order, i.item_key); if (!x) return `<span class="muted">—</span>`;
+    const p = x.p, f = p.fabric || {};
+    const fab = [f.fabric_name, f.fabric_code, f.shade_code].filter(Boolean).join(" · ") || (x.layer === "blind" ? (p.blind_type ? p.blind_type + " blind" : "Blind") : "—");
+    const lin = x.layer === "main" ? (p.has_lining === false ? "No lining" : (p.lining && p.lining.lining_name ? "Lining: " + p.lining.lining_name : "")) : (x.layer === "sheer" ? "No lining" : "");
+    const pl = [p.pleat_style, p.computed_panel_count ? p.computed_panel_count + " panels" : ""].filter(Boolean).join(" · ");
+    return `${esc(fab)}${lin ? `<br>${esc(lin)}` : ""}${pl ? `<br>${esc(pl)}` : ""}`;
+  };
+  const widthOf = (i) => { const x = altOrderPanel(order, i.item_key); const v = x && x.p.final_curtain_width; return v ? altIn(v) : "—"; };
+  const rows = live.map((i, n) => {
+    const sized = !!i.size_dim;
+    const nowV = i.size_now != null ? Number(i.size_now) : null, newV = i.size_new != null ? Number(i.size_new) : null;
+    const diff = nowV != null && newV != null ? newV - nowV : null;
+    const sizeCells = sized
+      ? `<td class="c">${i.size_dim === "width" ? "Width" : "Height"}<br><b>${altIn(nowV)}</b></td>
+         <td class="c new">${newV != null ? `<span class="big">${altIn(newV)}</span>` : `<span class="red"><b>NOT SET</b><br>call the designer</span>`}</td>
+         <td class="c">${diff != null ? `<b class="red">${diff > 0 ? "+" : "−"}${altIn(Math.abs(diff))}</b><br>${altSizeVerb(i.size_dim, nowV, newV)}` : "—"}</td>`
+      : `<td colspan="3" class="fixcell"><b>${esc(i.fix || "—")}</b></td>`;
+    return `<tr><td class="c">${n + 1}</td><td>${esc(i.item_label || "General")}${i.layer ? `<br><b>${esc(String(i.layer).toUpperCase())}</b>` : ""}</td>
+      <td class="small">${fabricLine(i)}</td><td class="c">${widthOf(i)}</td>${sizeCells}</tr>`;
+  }).join("");
+  const anyShorten = live.some(i => i.size_dim === "height" && i.size_new != null && Number(i.size_new) < Number(i.size_now));
+  const anyLengthen = live.some(i => i.size_dim === "height" && i.size_new != null && Number(i.size_new) > Number(i.size_now));
+  const how = [
+    `Measure each curtain first. If the measured size is not the size NOW on this sheet, stop and call the office.`,
+    anyShorten ? `To shorten: open the bottom hem, take the extra length off the bottom, re-hem with the same hem depth. Do not touch the heading / pleats.` : "",
+    anyLengthen ? `To lengthen: let down the bottom hem. If there is not enough hem, stop and call the designer before adding a band.` : "",
+    live.some(i => i.layer === "Main" && i.size_dim === "height") ? `Main curtains: change the <b>lining by the same amount</b>, keeping the same gap between lining and fabric as now.` : "",
+    `Check every panel of the curtain — all panels must finish at the new size.`,
+  ].filter(Boolean).map(t => `<li>${t}</li>`).join("");
+  const notes = issues.map((i, n) => `<tr><td class="c">${n + 1}</td><td>${esc(i.item_label || "")}${i.layer ? " · " + esc(i.layer) : ""}</td>
+     <td>${esc(i.issue_type || "")}${i.description ? `<br><span class="muted">"${esc(i.description)}"</span>` : ""}</td>
+     <td>${i.designer_status === "rejected" ? `<span class="red"><b>Rejected — DO NOT MAKE</b></span>` : i.designer_status === "pending" ? `<span class="red">Waiting</span>` : i.designer_status === "changed" ? "Fix changed" : i.designer_status === "approved" ? "Approved" : "—"}${i.decided_by ? ` · ${esc(i.decided_by)}` : ""}${i.designer_note ? `<br><span class="muted">${esc(i.designer_note)}</span>` : ""}</td></tr>`).join("");
+  const photos = issues.flatMap(i => (i.photos || []).map(p => `<img src="${photoUrl(p)}">`)).join("");
+  const sign = live.map((i, n) => `<tr><td class="c">${n + 1}</td><td></td><td></td><td class="c">${i.size_dim ? "______\"" : ""}</td><td></td><td></td></tr>`).join("");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Alteration job sheet – Case ${cs.case_no} – ${esc(cs.customer_name)}</title>
+<style>
+ @page { size: A4; margin: 12mm }
+ body { font-family: Helvetica, Arial, sans-serif; color: #111827; font-size: 11px; margin: 0; }
+ .logo { font-family: "Times New Roman", serif; font-weight: bold; font-size: 20px; letter-spacing: 1px } .logo small { display:block; font: 8px Helvetica; letter-spacing: 6px }
+ h1 { font-size: 19px; margin: 10px 0 6px; display:flex; justify-content:space-between } h2 { font-size: 12.5px; margin: 12px 0 4px }
+ table { width: 100%; border-collapse: collapse } td, th { border: 1px solid #9CA3AF; padding: 4px 6px; vertical-align: middle; text-align: left }
+ th { background: #111827; color: #fff; font-size: 10.5px } .info td.k { background: #F3F4F6; color: #4B5563; font-size: 10px; width: 12% }
+ .c { text-align: center } .small { font-size: 9.5px; color: #374151 } .new { background: #ECFDF5 } .big { font-size: 17px; font-weight: bold }
+ .red { color: #B91C1C } .muted { color: #6B7280 } .fixcell { background: #ECFDF5; font-size: 12px }
+ .how { border: 1px solid #9CA3AF; background: #F9FAFB; padding: 6px 8px 6px 22px; margin: 0 } .how li { margin: 2px 0 }
+ .photos img { height: 70px; margin: 2px; border: 1px solid #ddd } .sign td { height: 30px } .foot { margin-top: 10px; font-size: 9px; color: #6B7280; text-align: right }
+ .warn { border: 2px solid #B91C1C; color: #B91C1C; padding: 6px; font-weight: bold; text-align: center; margin: 6px 0 }
+ .bar { position: sticky; top: 0; background: #fff; padding: 8px 0; text-align: center } .bar button { font-size: 15px; padding: 10px 18px; background: #111827; color: #fff; border: 0; border-radius: 8px }
+ @media print { .bar { display: none } }
+</style></head><body>
+<div class="bar"><button onclick="window.print()">🖨 Print / Save as PDF</button></div>
+<div class="logo">D'MOKSHA<small>HOMES</small></div>
+<h1><span>ALTERATION JOB SHEET</span><span>Case #${cs.case_no}</span></h1>
+${pending ? `<div class="warn">NOT APPROVED BY THE DESIGNER YET — do not start</div>` : ""}
+<table class="info">
+ <tr><td class="k">Client ID</td><td><b>${esc(cs.client_id || "—")}</b></td><td class="k">Order</td><td><b>${cs.order_id ? "#" + cs.order_id : "—"}</b></td><td class="k">City</td><td>${esc(cs.city || "")}</td></tr>
+ <tr><td class="k">Customer</td><td><b>${esc(cs.customer_name)}</b></td><td class="k">Address</td><td>${esc(cs.address || "")}</td><td class="k">Mobile</td><td>${esc(cs.customer_mobile || "")}</td></tr>
+ <tr><td class="k">Designer</td><td>${esc(cs.designer_name || (order && order.designer_name) || "—")}</td><td class="k">Raised by</td><td>${esc(cs.raised_by || "")} · ${new Date(cs.raised_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</td><td class="k">Cost borne by</td><td><b>${cs.cost_bearer === "customer" ? "Customer (chargeable)" : cs.cost_bearer === "dmoksha" ? "D'Moksha" : "—"}</b></td></tr>
+ <tr><td class="k">Approval</td><td colspan="3">${approval}</td><td class="k">Return to client</td><td>______________</td></tr>
+</table>
+<h2>WHAT TO CHANGE — ${live.length} item${live.length === 1 ? "" : "s"}</h2>
+<table><tr><th class="c" style="width:4%">#</th><th style="width:19%">Curtain</th><th style="width:28%">Fabric · lining · pleat</th><th class="c" style="width:10%">Finished width</th><th class="c" style="width:12%">Size NOW</th><th class="c" style="width:14%">Size NEW</th><th class="c" style="width:13%">Change</th></tr>${rows || `<tr><td colspan="7" class="c muted">Nothing to make</td></tr>`}</table>
+${live.some(i => i.size_dim && i.fix) ? `<div class="small" style="margin-top:3px">${live.filter(i => i.size_dim && i.fix).map((i, n) => `${esc(i.item_label)} ${esc(i.layer || "")}: ${esc(i.fix)}`).join(" · ")}</div>` : ""}
+${rej.length ? `<h2 class="red">DO NOT MAKE (rejected by designer)</h2><table>${rej.map(i => `<tr><td><s>${esc(i.item_label)} ${esc(i.layer || "")} — ${esc(i.fix || i.issue_type || "")}</s></td><td class="red">${esc(i.designer_note || "")}</td></tr>`).join("")}</table>` : ""}
+<h2>HOW TO ALTER</h2><ul class="how">${how}</ul>
+<h2>WHAT WAS NOTED AT SITE · and the designer's decision</h2>
+<table><tr><th class="c" style="width:4%">#</th><th style="width:26%">Curtain</th><th style="width:38%">Noted by operations</th><th>Designer</th></tr>${notes}</table>
+${photos ? `<h2>PHOTOS</h2><div class="photos">${photos}</div>` : ""}
+<h2>FACTORY SIGN-OFF</h2>
+<table class="sign"><tr><th class="c" style="width:4%">#</th><th>Received from client</th><th>Altered by</th><th class="c">Measured after</th><th>QC by</th><th>Sent back on</th></tr>${sign}</table>
+<div class="foot">Alteration job sheet · Case #${cs.case_no} · generated ${esc(stamp)} · always print fresh — designer decisions can change</div>
+</body></html>`;
+  win.document.open(); win.document.write(html); win.document.close();
+}
+async function downloadAlterationJobSheet(cs, photoUrl) {
+  const win = window.open("", "_blank");   // open first (synchronously) so phones don't block the pop-up
+  if (!win) { alert("Allow pop-ups for this site to download the job sheet."); return; }
+  win.document.write("<p style='font-family:sans-serif;padding:20px'>Preparing the job sheet…</p>");
+  const [iss, ord] = await Promise.all([
+    supabase.from("alteration_issues").select("*").eq("case_id", cs.id).order("created_at"),
+    cs.order_id ? supabase.from("customer_orders").select("id,designer_name,windows").eq("id", cs.order_id).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
+  if (iss.error) { win.document.body.innerHTML = "Could not load: " + iss.error.message; return; }
+  openAlterationJobSheet(win, cs, iss.data || [], ord.data, photoUrl);
+}
+
 function DesignerAlterations({ staff, onCount }) {
   const [rows, setRows] = useState(null); const [issues, setIssues] = useState({}); const [tick, setTick] = useState(0);
   const [showDone, setShowDone] = useState(false);
@@ -805,9 +925,17 @@ function DesignerAlterations({ staff, onCount }) {
       onCount && onCount((i.data || []).filter(x => x.designer_status === "pending").length);
     })();
   }, [tick]);
-  const decide = async (issue, decision, fix, note) => {
+  const decide = async (issue, decision, fix, note, size) => {
+    if (decision === "changed" && issue.size_dim) {
+      const n = Number(size);
+      if (!(n > 0)) { alert(`Enter the new ${issue.size_dim} in inches.`); return; }
+      const d = n - Number(issue.size_now);
+      if (!fix || !fix.trim()) fix = issue.size_dim === "width"
+        ? (d < 0 ? `Reduce width by ${Math.abs(d)}"` : `Add ${d}" of width`)
+        : (d < 0 ? `Shorten by ${Math.abs(d)}" — re-hem the bottom` : `Lengthen by ${d}" — let down the hem`);
+    }
     setBusy(true);
-    const { error } = await supabase.rpc("designer_decide_alteration", { p_issue: issue.id, p_decision: decision, p_fix: fix || null, p_note: note || null });
+    const { error } = await supabase.rpc("designer_decide_alteration", { p_issue: issue.id, p_decision: decision, p_fix: fix || null, p_note: note || null, p_size: (decision === "changed" && issue.size_dim) ? Number(size) : null });
     setBusy(false);
     if (error) { alert(error.message); return; }
     setEdit(null); setTick(t => t + 1);
@@ -834,6 +962,8 @@ function DesignerAlterations({ staff, onCount }) {
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0"><div className="text-sm font-semibold">{i.item_label}{i.layer ? ` · ${i.layer}` : ""}</div>
                   <div className="text-sm text-red-700">{i.issue_type}</div>
+                  {i.size_dim && <div className="mt-1 rounded-lg bg-green-50 border border-green-200 px-2 py-1.5 text-sm">{i.size_dim === "width" ? "Width" : "Height"} <b>{altIn(i.size_now)}</b> → {i.size_new != null ? <b className="text-green-800 text-base">{altIn(i.size_new)}</b> : <b className="text-red-700">not set</b>}
+                    {i.size_new != null && <span className="text-gray-600"> · {altSizeVerb(i.size_dim, i.size_now, i.size_new)} {altIn(Math.abs(i.size_new - i.size_now))}</span>}</div>}
                   <div className="text-sm text-green-800 font-medium mt-0.5">Fix: {i.fix || "—"}</div>
                   {i.description && <div className="text-sm text-gray-700">{i.description}</div>}
                   {i.designer_note && i.designer_status !== "pending" && <div className="text-xs text-gray-600 mt-0.5">Your note: {i.designer_note}</div>}
@@ -841,13 +971,15 @@ function DesignerAlterations({ staff, onCount }) {
                 <span className={`shrink-0 text-[10px] font-semibold rounded px-1.5 py-0.5 ${ds[1]}`}>{ds[0]}</span>
               </div>
               {i.designer_status === "pending" && !open && <div className="grid grid-cols-3 gap-2 mt-2">
-                <button disabled={busy} onClick={() => decide(i, "approved")} className="py-2 rounded-lg bg-green-600 text-white text-sm font-semibold disabled:opacity-60">Approve</button>
-                <button disabled={busy} onClick={() => setEdit({ id: i.id, mode: "changed", fix: i.fix || "", note: "" })} className="py-2 rounded-lg border border-gray-300 text-sm font-semibold">Change fix</button>
+                <button disabled={busy || (i.size_dim && i.size_new == null)} onClick={() => decide(i, "approved")} title={i.size_dim && i.size_new == null ? "Enter the new size with Change fix" : ""} className="py-2 rounded-lg bg-green-600 text-white text-sm font-semibold disabled:opacity-40">Approve</button>
+                <button disabled={busy} onClick={() => setEdit({ id: i.id, mode: "changed", fix: i.size_dim ? "" : (i.fix || ""), note: "", size: i.size_new != null ? String(i.size_new) : "" })} className={`py-2 rounded-lg text-sm font-semibold ${i.size_dim && i.size_new == null ? "bg-blue-600 text-white" : "border border-gray-300"}`}>{i.size_dim && i.size_new == null ? `Set new ${i.size_dim}` : "Change fix"}</button>
                 <button disabled={busy} onClick={() => setEdit({ id: i.id, mode: "rejected", fix: "", note: "" })} className="py-2 rounded-lg border border-red-300 text-red-700 text-sm font-semibold">Reject</button></div>}
               {open && <div className="mt-2 space-y-2 rounded-lg bg-gray-50 border border-gray-200 p-3">
-                {edit.mode === "changed" && <Field label="The fix the factory should make"><textarea rows="2" value={edit.fix} onChange={e => setEdit({ ...edit, fix: e.target.value })} className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm" /></Field>}
+                {edit.mode === "changed" && i.size_dim && <Field label={`New ${i.size_dim} (inches) — now ${altIn(i.size_now)}`}><input type="number" inputMode="decimal" step="0.25" min="0" value={edit.size || ""} onChange={e => setEdit({ ...edit, size: e.target.value })} className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-base" placeholder="e.g. 88.25" />
+                  {Number(edit.size) > 0 && <div className="text-xs text-gray-600 mt-1">{altSizeVerb(i.size_dim, i.size_now, Number(edit.size))} {altIn(Math.abs(Number(edit.size) - Number(i.size_now)))}</div>}</Field>}
+                {edit.mode === "changed" && <Field label={i.size_dim ? "Extra instruction (optional — filled in from the size if left empty)" : "The fix the factory should make"}><textarea rows="2" value={edit.fix} onChange={e => setEdit({ ...edit, fix: e.target.value })} className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm" /></Field>}
                 <Field label={edit.mode === "rejected" ? "Why is it rejected?" : "Note (optional)"}><input value={edit.note} onChange={e => setEdit({ ...edit, note: e.target.value })} className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-sm" placeholder={edit.mode === "rejected" ? "e.g. customer agreed it is fine as it is" : ""} /></Field>
-                <div className="flex gap-2"><button disabled={busy} onClick={() => decide(i, edit.mode, edit.fix, edit.note)} className={`flex-1 py-2 rounded-lg text-white text-sm font-semibold disabled:opacity-60 ${edit.mode === "rejected" ? "bg-red-600" : "bg-blue-600"}`}>{edit.mode === "rejected" ? "Reject this issue" : "Save the new fix"}</button>
+                <div className="flex gap-2"><button disabled={busy} onClick={() => decide(i, edit.mode, edit.fix, edit.note, edit.size)} className={`flex-1 py-2 rounded-lg text-white text-sm font-semibold disabled:opacity-60 ${edit.mode === "rejected" ? "bg-red-600" : "bg-blue-600"}`}>{edit.mode === "rejected" ? "Reject this issue" : "Save the new fix"}</button>
                   <button onClick={() => setEdit(null)} className="px-4 py-2 rounded-lg border border-gray-300 text-sm">Cancel</button></div>
               </div>}
             </div>); })}</div>
@@ -887,6 +1019,7 @@ function FactoryAlterations({ staff }) {
             <label key={i.id} className="py-2 flex items-start gap-2">
               <input type="checkbox" checked={i.status === "resolved"} disabled={i.designer_status === "rejected"} onChange={() => toggleIssue(i)} className="mt-1 w-5 h-5 accent-green-600" />
               <div className="min-w-0"><div className={`text-sm font-semibold ${i.status === "resolved" || i.designer_status === "rejected" ? "line-through text-gray-400" : ""}`}>{i.item_label}{i.layer ? ` · ${i.layer}` : ""} <span className="text-xs text-red-700">({i.issue_type})</span></div>
+                {i.size_dim && i.designer_status !== "rejected" && <div className="text-sm">{i.size_dim === "width" ? "Width" : "Height"} <b>{altIn(i.size_now)}</b> → {i.size_new != null ? <b className="text-green-700">{altIn(i.size_new)}</b> : <b className="text-red-700">not set — ask the designer</b>}</div>}
                 {i.fix && <div className={`text-sm ${i.designer_status === "rejected" ? "text-gray-400 line-through" : "text-green-800 font-medium"}`}>Fix: {i.fix}</div>}
                 {i.designer_status === "pending" && <div className="text-xs text-amber-700 font-medium">Waiting for {c.designer_name || "the designer"} to approve</div>}
                 {i.designer_status === "rejected" && <div className="text-xs text-red-700 font-medium">Rejected by {i.decided_by} — do not make{i.designer_note ? `: ${i.designer_note}` : ""}</div>}
@@ -895,6 +1028,9 @@ function FactoryAlterations({ staff }) {
                 {(i.photos || []).length > 0 && <div className="flex gap-1 mt-1">{i.photos.map(p => <a key={p} href={publicUrl(p)} target="_blank" rel="noopener"><img src={publicUrl(p)} className="h-14 w-14 object-cover rounded border" /></a>)}</div>}</div>
             </label>))}</div>
           {c.note && <div className="text-xs text-gray-600 mt-1">📝 {c.note}</div>}
+          {(() => { const waiting = c.needs_approval || iss.some(i => i.designer_status === "pending"); const unset = iss.some(i => i.size_dim && i.size_new == null && i.designer_status !== "rejected"); return (
+            <button disabled={waiting} onClick={() => downloadAlterationJobSheet(c, publicUrl)} className="mt-3 w-full py-2.5 rounded-lg bg-gray-900 text-white text-sm font-semibold disabled:bg-gray-200 disabled:text-gray-500">
+              {waiting ? "📄 Job sheet — after the designer approves" : unset ? "📄 Download job sheet (⚠ a size is not set)" : "📄 Download job sheet"}</button>); })()}
           <div className="grid grid-cols-2 gap-2 mt-3">
             {c.status === "open" && <button onClick={() => setCase(c, "in_progress")} className="py-2 rounded-lg bg-amber-500 text-white text-sm font-semibold">Start work</button>}
             {(c.status === "open" || c.status === "in_progress") && <button onClick={() => { if (confirm("Mark this alteration as done and ready to send back?")) setCase(c, "resolved"); }} className="py-2 rounded-lg bg-green-600 text-white text-sm font-semibold">Done ✓</button>}
