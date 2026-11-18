@@ -1946,7 +1946,8 @@ function FieldTeamView({ city, user }) {
   const exportExpenses = () => downloadCSV(`dmoksha_expenses_${city.toLowerCase()}_${from}_to_${to}.csv`, ex, [
     { label: "Date", get: e => e.expense_date }, { label: "Staff", get: e => e.staff_name }, { label: "Customer", get: e => e.customer_name },
     { label: "Fare to", get: e => e.fare_to }, { label: "Fare back", get: e => e.fare_back }, { label: "Total", get: e => expTotal(e) },
-    { label: "Paid using", get: e => e.payment_method }, { label: "Note", get: e => e.note }, { label: "Review", get: e => e.review_status || "pending" },
+    { label: "Paid using", get: e => e.payment_method }, { label: "Travel mode", get: e => e.travel_mode === "bike" ? "Bike" : e.travel_mode === "none" ? "No travel cost" : "Cab" }, { label: "Km to", get: e => e.km_to ?? "" }, { label: "Km back", get: e => e.km_back ?? "" },
+    { label: "Note", get: e => e.note }, { label: "Review", get: e => e.review_status || "pending" },
     { label: "Reviewed by", get: e => e.reviewed_by }, { label: "Review note", get: e => e.review_note },
     { label: "Bills", get: e => [...expPaths(e, "to"), ...expPaths(e, "back")].map(fileUrl).join(" ") },
   ]);
@@ -2026,11 +2027,11 @@ function FieldTeamView({ city, user }) {
                       <td className="px-3 py-2 whitespace-nowrap">{fmtD(e.expense_date)}</td>
                       <td className="px-3 py-2 whitespace-nowrap font-medium">{e.staff_name}</td>
                       <td className="px-3 py-2">{e.customer_name || "—"}{e.note && <div className="text-xs text-gray-500 mt-0.5 max-w-xs">{e.note}</div>}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">{inrA(e.fare_to)}<div className="mt-1"><Thumbs paths={expPaths(e, "to")} /></div></td>
-                      <td className="px-3 py-2 whitespace-nowrap">{inrA(e.fare_back)}<div className="mt-1"><Thumbs paths={expPaths(e, "back")} /></div></td>
+                      <td className="px-3 py-2 whitespace-nowrap">{inrA(e.fare_to)}{e.travel_mode === "bike" && <div className="text-[11px] text-gray-600">🏍 {Number(e.km_to || 0)} km</div>}<div className="mt-1"><Thumbs paths={expPaths(e, "to")} /></div></td>
+                      <td className="px-3 py-2 whitespace-nowrap">{inrA(e.fare_back)}{e.travel_mode === "bike" && <div className="text-[11px] text-gray-600">🏍 {Number(e.km_back || 0)} km</div>}<div className="mt-1"><Thumbs paths={expPaths(e, "back")} /></div></td>
                       <td className="px-3 py-2 font-semibold whitespace-nowrap">{inrA(expTotal(e))}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{e.payment_method}</td>
-                      <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{expPaths(e, "to").length + expPaths(e, "back").length} image(s)</td>
+                      <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{e.travel_mode === "none" ? "No travel cost" : e.travel_mode === "bike" ? `Bike · ₹${Number(e.rate_per_km || 10)}/km · no bill` : `${expPaths(e, "to").length + expPaths(e, "back").length} image(s)`}</td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         <span className={`text-[11px] font-semibold rounded px-1.5 py-0.5 ${ui[1]}`}>{ui[0]}</span>
                         {e.reviewed_by && <div className="text-[11px] text-gray-500 mt-0.5">{e.reviewed_by}{e.review_note ? ` — ${e.review_note}` : ""}</div>}
@@ -2229,8 +2230,8 @@ function AccountsApp({ user }) {
                           <tr key={r.id} className="border-t border-gray-100 align-top">
                             <td className="px-3 py-2 whitespace-nowrap">{fmtD(r.expense_date)}</td>
                             <td className="px-3 py-2">{r.customer_name || "—"}{r.note && <div className="text-xs text-gray-500">{r.note}</div>}</td>
-                            <td className="px-3 py-2">{inrA(r.fare_to)}<div className="mt-1"><Thumbs paths={expPaths(r, "to")} /></div></td>
-                            <td className="px-3 py-2">{inrA(r.fare_back)}<div className="mt-1"><Thumbs paths={expPaths(r, "back")} /></div></td>
+                            <td className="px-3 py-2">{inrA(r.fare_to)}{r.travel_mode === "bike" && <div className="text-[11px] text-gray-600">🏍 {Number(r.km_to || 0)} km</div>}<div className="mt-1"><Thumbs paths={expPaths(r, "to")} /></div></td>
+                            <td className="px-3 py-2">{inrA(r.fare_back)}{r.travel_mode === "bike" && <div className="text-[11px] text-gray-600">🏍 {Number(r.km_back || 0)} km</div>}<div className="mt-1"><Thumbs paths={expPaths(r, "back")} /></div></td>
                             <td className="px-3 py-2 font-semibold">{inrA(expTotal(r))}</td>
                             <td className="px-3 py-2 text-xs text-gray-500">{r.reviewed_by || ""}</td>
                             <td className="px-3 py-2"><button onClick={() => setPaying({ name: g.name, bills: [r] })} className="text-xs font-semibold text-green-700 hover:underline whitespace-nowrap">Pay this only</button></td>
@@ -2683,7 +2684,7 @@ function InstallationCard({ c, data, edit, city, onOutcome, onOpenCase, onSchedu
                     <div className="text-[10px] uppercase tracking-wider text-gray-500">Travel bill (staff, petty cash)</div>
                     {bills.length ? bills.map(b => (
                       <div key={b.id} className="flex flex-wrap items-center gap-2 mt-0.5">
-                        <span className="font-semibold">{inrA(expTotal(b))}</span><span className="text-xs text-gray-600">{b.staff_name} · {b.payment_method}</span>
+                        <span className="font-semibold">{inrA(expTotal(b))}</span><span className="text-xs text-gray-600">{b.travel_mode === "bike" ? `🏍 ${Number(b.km_to || 0) + Number(b.km_back || 0)} km · ` : ""}{b.staff_name} · {b.payment_method}</span>
                         <span className={`text-[10px] font-semibold rounded px-1.5 py-0.5 ${(REVIEW_UI[b.review_status || "pending"] || REVIEW_UI.pending)[1]}`}>{(REVIEW_UI[b.review_status || "pending"] || REVIEW_UI.pending)[0]}</span>
                         <Thumbs paths={[...expPaths(b, "to"), ...expPaths(b, "back")]} />
                       </div>
