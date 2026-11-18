@@ -1679,7 +1679,7 @@ function AddVisitModal({ date, city, initial, onClose, onSave }) {
       const ors = [`customer_name.ilike.%${term}%`, `client_id.ilike.%${term}%`];
       if (digits.length >= 4) ors.push(`customer_mobile.ilike.%${digits}%`);
       const { data } = await supabase.from("customer_orders")
-        .select("id,customer_name,customer_mobile,client_id,customer_city,customer_building_name,customer_landmark,designer_name,windows_count,status,created_at")
+        .select("id,customer_name,customer_mobile,client_id,project_no,customer_city,customer_building_name,customer_landmark,designer_name,windows_count,status,created_at")
         .or(ors.join(",")).order("created_at", { ascending: false }).limit(8);
       if (alive) { setHits(data || []); setSearching(false); }
     }, 250);
@@ -1770,7 +1770,7 @@ function AddVisitModal({ date, city, initial, onClose, onSave }) {
                     {searching && hits.length === 0 && <div className="px-3 py-2 text-gray-500">Searching…</div>}
                     {hits.map(o => (
                       <button type="button" key={o.id} onClick={() => pickOrder(o)} className="block w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-gray-100 last:border-0">
-                        <div className="font-medium text-gray-900">{o.customer_name || "—"} <span className="font-mono text-xs text-blue-700 ml-1">{o.client_id || ""}</span></div>
+                        <div className="font-medium text-gray-900">{o.customer_name || "—"} <span className="font-mono text-xs text-blue-700 ml-1">{cidP(o.client_id, o.project_no)}</span></div>
                         <div className="text-xs text-gray-500">#{o.id} · {o.customer_mobile || "—"} · {o.customer_city || ""} · {o.windows_count ?? "?"} windows · {o.designer_name || ""} · {o.status || ""}</div>
                       </button>
                     ))}
@@ -1854,6 +1854,9 @@ function AddVisitModal({ date, city, initial, onClose, onSave }) {
 const fileUrl = (path) => path ? `${SUPABASE_URL}/storage/v1/object/public/invoices/${path}` : null;
 const inrA = n => "₹" + Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 const ftMonthRange = () => { const d = new Date(); const p = n => String(n).padStart(2, "0"); return { from: `${d.getFullYear()}-${p(d.getMonth() + 1)}-01`, to: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` }; };
+// Client ID with the project suffix (Ajay 18 Nov 2026): one ID per customer;
+// project 2 onwards SHOWS as "-P2", "-P3". Display only — saved rows keep the base id.
+const cidP = (id, projectNo) => { const s = id == null ? "" : String(id).trim(); const n = Number(projectNo) || 1; return (!s || n < 2 || /-P\d+$/i.test(s)) ? s : s + "-P" + n; };
 const fmtD = iso => iso ? new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "";
 const expTotal = e => Number(e.fare_to || 0) + Number(e.fare_back || 0);
 const expPaths = (e, leg) => { const arr = e[`invoice_${leg}_paths`]; return (arr && arr.length) ? arr : (e[`invoice_${leg}_path`] ? [e[`invoice_${leg}_path`]] : []); };
@@ -2516,7 +2519,7 @@ function InstallationsView({ city, fieldVisits, user, readOnly, onAddVisit, onEd
         many(c => supabase.from("installation_reviews").select("*").in("visit_id", c)),
         many(c => supabase.from("job_completions").select("*").in("job_id", c)),
         many(c => supabase.from("travel_expenses").select("*").in("visit_id", c)),
-        orderIds.length ? supabase.from("customer_orders").select("id,customer_name,customer_mobile,client_id,customer_building_name,customer_landmark,customer_city,designer_name,windows_count,windows,balance_amount,balance_paid,special_note").in("id", orderIds).then(r => r.data || []) : Promise.resolve([]),
+        orderIds.length ? supabase.from("customer_orders").select("id,customer_name,customer_mobile,client_id,project_no,customer_building_name,customer_landmark,customer_city,designer_name,windows_count,windows,balance_amount,balance_paid,special_note").in("id", orderIds).then(r => r.data || []) : Promise.resolve([]),
         orderIds.length ? supabase.from("alteration_cases").select("*").in("order_id", orderIds).order("raised_at").then(r => r.data || []) : Promise.resolve([]),
         supabase.from("staff").select("id,name,role,city").then(r => r.data || []),
         many(c => supabase.from("factory_dispatches").select("*").in("visit_id", c)),
@@ -2569,14 +2572,14 @@ function InstallationsView({ city, fieldVisits, user, readOnly, onAddVisit, onEd
   const visitTypes = VISIT_TYPES.filter(t => t !== "Meeting");
 
   const exportCustomers = () => downloadCSV(`installations_${city.toLowerCase()}_${from}_to_${to}.csv`, cards, [
-    { label: "Client ID", get: c => c.clientId }, { label: "Customer", get: c => c.customer }, { label: "Address", get: c => c.address }, { label: "Order #", get: c => c.order?.id || "" },
+    { label: "Client ID", get: c => cidP(c.clientId, c.order?.project_no) }, { label: "Customer", get: c => c.customer }, { label: "Address", get: c => c.address }, { label: "Order #", get: c => c.order?.id || "" },
     { label: "Stylist", get: c => c.order?.designer_name || c.visits[0].stylist || "" }, { label: "Status", get: c => c.statusLabel[0] }, { label: "Visits", get: c => c.visits.length },
     { label: "First visit", get: c => c.visits[0].visit_date }, { label: "Last visit", get: c => c.lastDate },
     { label: "Travel (₹)", get: c => c.travel }, { label: "Alteration costs (₹)", get: c => c.altCost }, { label: "Total cost (₹)", get: c => c.travel + c.altCost },
     { label: "Open issues", get: c => c.cases.filter(x => x.status !== "resolved" && x.status !== "cancelled").flatMap(x => (data.issues[x.id] || []).map(i => `${i.item_label} ${i.layer || ""}: ${i.issue_type}`)).join(" | ") },
   ]);
   const exportVisits = () => downloadCSV(`installation_visits_${city.toLowerCase()}_${from}_to_${to}.csv`, cards.flatMap(c => c.visits.map(v => ({ c, v }))), [
-    { label: "Date", get: r => r.v.visit_date }, { label: "Client ID", get: r => r.c.clientId }, { label: "Customer", get: r => r.c.customer }, { label: "Visit type", get: r => r.v.visit_type },
+    { label: "Date", get: r => r.v.visit_date }, { label: "Client ID", get: r => cidP(r.c.clientId, r.c.order?.project_no) }, { label: "Customer", get: r => r.c.customer }, { label: "Visit type", get: r => r.v.visit_type },
     { label: "Support staff", get: r => r.v.support_name }, { label: "Stylist", get: r => r.v.stylist }, { label: "Staff report", get: r => data.jobs[r.v.id]?.status || "" },
     { label: "Outcome", get: r => OUTCOME_UI[data.reviews[r.v.id]?.outcome]?.[0] || "" }, { label: "Marked by", get: r => data.reviews[r.v.id]?.marked_by || "" },
     { label: "Travel bill (₹)", get: r => (data.bills[r.v.id] || []).filter(b => b.review_status !== "rejected").reduce((s, b) => s + expTotal(b), 0) },
@@ -2629,7 +2632,7 @@ function InstallationCard({ c, data, edit, city, onOutcome, onOpenCase, onSchedu
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-gray-900 text-base">{c.customer}</span>
-            {c.clientId && <span className="font-mono text-xs text-blue-700">{c.clientId}</span>}
+            {c.clientId && <span className="font-mono text-xs text-blue-700">{cidP(c.clientId, c.order?.project_no)}</span>}
             {o && <span className="text-xs text-gray-500">Order #{o.id}</span>}
             <span className={`text-[11px] font-semibold rounded px-2 py-0.5 ${c.statusLabel[1]}`}>{c.statusLabel[0]}</span>
             {c.cases.filter(x => x.status !== "cancelled").map(x => <span key={x.id} role="button" tabIndex={0} title={`Alteration job sheet for case #${x.case_no}`}
@@ -2796,7 +2799,7 @@ function OutcomeModal({ visit, card, data, user, city, onClose, onSaved, onSched
     <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-end sm:items-center justify-center sm:p-4" onClick={onClose}>
       <div className="bg-white w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl shadow-card" onClick={e => e.stopPropagation()}>
         <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
-          <div><div className="font-semibold">Outcome · {visit.visit_type} · {fmtD(visit.visit_date)}</div><div className="text-xs text-gray-500">{card.customer} {card.clientId && <span className="font-mono text-blue-700">{card.clientId}</span>} · {visit.support_name || "no support"}</div></div>
+          <div><div className="font-semibold">Outcome · {visit.visit_type} · {fmtD(visit.visit_date)}</div><div className="text-xs text-gray-500">{card.customer} {card.clientId && <span className="font-mono text-blue-700">{cidP(card.clientId, card.order?.project_no)}</span>} · {visit.support_name || "no support"}</div></div>
           <button onClick={onClose} className="w-9 h-9 rounded-full hover:bg-gray-100 text-2xl text-gray-500">×</button>
         </div>
         {err && <div className="mx-4 mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">{err}</div>}

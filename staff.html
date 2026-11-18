@@ -292,6 +292,9 @@ function DayList({ staff, date, section, refreshKey, onChanged }) {
 }
 
 // ---------- Job sheet (installation + maintenance) ----------
+// Client ID with the project suffix (Ajay 18 Nov 2026): one ID per customer;
+// project 2 onwards SHOWS as "-P2", "-P3". Display only — saved rows keep the base id.
+const cidP = (id, projectNo) => { const s = id == null ? "" : String(id).trim(); const n = Number(projectNo) || 1; return (!s || n < 2 || /-P\d+$/i.test(s)) ? s : s + "-P" + n; };
 const Field = ({ label, children }) => <label className="block"><span className="text-xs uppercase tracking-wider text-gray-500 font-semibold">{label}</span>{children}</label>;
 function JobSheet({ staff, date, row, existing, onClose, onSaved }) {
   const vt = row.visit || "";
@@ -322,7 +325,7 @@ function JobSheet({ staff, date, row, existing, onClose, onSaved }) {
 
   useEffect(() => {
     if (!(isInstall && row.orderId)) return;
-    supabase.from("customer_orders").select("id,customer_name,customer_mobile,client_id,customer_building_name,customer_landmark,customer_city,designer_name,windows_count,windows,rooms,advance_amount,balance_amount,balance_paid,special_note,status")
+    supabase.from("customer_orders").select("id,customer_name,customer_mobile,client_id,project_no,customer_building_name,customer_landmark,customer_city,designer_name,windows_count,windows,rooms,advance_amount,balance_amount,balance_paid,special_note,status")
       .eq("id", row.orderId).single().then(({ data }) => setOrder(data || null));
     (async () => {
       const [e, p] = await Promise.all([
@@ -445,7 +448,7 @@ function JobSheet({ staff, date, row, existing, onClose, onSaved }) {
           {/* Customer */}
           <section className="rounded-xl border border-gray-200 p-3">
             <div className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-1">Customer</div>
-            <div className="font-semibold text-gray-900">{row.customer}{row.clientId && <span className="ml-2 font-mono text-xs text-blue-700">{row.clientId}</span>}</div>
+            <div className="font-semibold text-gray-900">{row.customer}{row.clientId && <span className="ml-2 font-mono text-xs text-blue-700">{cidP(row.clientId, order?.project_no)}</span>}</div>
             {addr && <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`} target="_blank" rel="noopener" className="block text-sm text-gray-700 mt-1 underline decoration-gray-300">📍 {addr}</a>}
             {(row.mobile || order?.customer_mobile) && <a href={`tel:${row.mobile || order.customer_mobile}`} className="block text-sm text-blue-600 mt-1">📞 {row.mobile || order.customer_mobile}</a>}
             {row.partner && <div className="text-sm text-gray-600 mt-1">👤 Stylist: {row.partner}</div>}
