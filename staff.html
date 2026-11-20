@@ -839,11 +839,11 @@ function openAlterationJobSheet(win, cs, issues, order, photoUrl) {
     const nowV = i.size_now != null ? Number(i.size_now) : null, newV = i.size_new != null ? Number(i.size_new) : null;
     const diff = nowV != null && newV != null ? newV - nowV : null;
     const sizeCells = sized
-      ? `<td class="c">${i.size_dim === "width" ? "Width" : "Height"}<br><b>${altIn(nowV)}</b></td>
+      ? `<td class="c">${i.size_dim === "width" ? "Width" : "Height"}<br><b>${altIn(nowV)}</b>${i.size_cause === "factory_mistake" ? `<br><span class="small red">as made${i.size_ordered != null ? ` · ordered ${altIn(i.size_ordered)}` : ""}</span>` : ""}</td>
          <td class="c new">${newV != null ? `<span class="big">${altIn(newV)}</span>` : `<span class="red"><b>NOT SET</b><br>call the designer</span>`}</td>
          <td class="c">${diff != null ? `<b class="red">${diff > 0 ? "+" : "−"}${altIn(Math.abs(diff))}</b><br>${altSizeVerb(i.size_dim, nowV, newV)}` : "—"}</td>`
       : `<td colspan="3" class="fixcell"><b>${esc(i.fix || "—")}</b></td>`;
-    return `<tr><td class="c">${n + 1}</td><td>${esc(i.item_label || "General")}${i.layer ? `<br><b>${esc(String(i.layer).toUpperCase())}</b>` : ""}</td>
+    return `<tr><td class="c">${n + 1}</td><td>${esc(i.item_label || "General")}${i.layer ? `<br><b>${esc(String(i.layer).toUpperCase())}</b>` : ""}${i.size_cause === "factory_mistake" ? `<br><span class="fm">FACTORY MISTAKE</span>` : ""}</td>
       <td class="small">${fabricLine(i)}</td><td class="c">${widthOf(i)}</td>${sizeCells}</tr>`;
   }).join("");
   const anyShorten = live.some(i => i.size_dim === "height" && i.size_new != null && Number(i.size_new) < Number(i.size_now));
@@ -873,6 +873,7 @@ function openAlterationJobSheet(win, cs, issues, order, photoUrl) {
  .red { color: #B91C1C } .muted { color: #6B7280 } .fixcell { background: #ECFDF5; font-size: 12px }
  .how { border: 1px solid #9CA3AF; background: #F9FAFB; padding: 6px 8px 6px 22px; margin: 0 } .how li { margin: 2px 0 }
  .photos img { height: 70px; margin: 2px; border: 1px solid #ddd } .sign td { height: 30px } .foot { margin-top: 10px; font-size: 9px; color: #6B7280; text-align: right }
+ .fm { display: inline-block; background: #B91C1C; color: #fff; font-size: 9px; font-weight: bold; padding: 1px 5px; border-radius: 3px; margin-top: 3px }
  .warn { border: 2px solid #B91C1C; color: #B91C1C; padding: 6px; font-weight: bold; text-align: center; margin: 6px 0 }
  .bar { position: sticky; top: 0; background: #fff; padding: 8px 0; text-align: center } .bar button { font-size: 15px; padding: 10px 18px; background: #111827; color: #fff; border: 0; border-radius: 8px }
  @media print { .bar { display: none } }
@@ -965,7 +966,7 @@ function DesignerAlterations({ staff, onCount }) {
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0"><div className="text-sm font-semibold">{i.item_label}{i.layer ? ` · ${i.layer}` : ""}</div>
                   <div className="text-sm text-red-700">{i.issue_type}</div>
-                  {i.size_dim && <div className="mt-1 rounded-lg bg-green-50 border border-green-200 px-2 py-1.5 text-sm">{i.size_dim === "width" ? "Width" : "Height"} <b>{altIn(i.size_now)}</b> → {i.size_new != null ? <b className="text-green-800 text-base">{altIn(i.size_new)}</b> : <b className="text-red-700">not set</b>}
+                  {i.size_dim && <div className="mt-1 rounded-lg bg-green-50 border border-green-200 px-2 py-1.5 text-sm">{i.size_cause === "factory_mistake" && <div className="text-[11px] font-bold text-red-700">FACTORY MISTAKE — made the wrong size{i.size_ordered != null ? ` (ordered ${altIn(i.size_ordered)})` : ""}</div>}{i.size_dim === "width" ? "Width" : "Height"}{i.size_cause === "factory_mistake" ? " as made" : ""} <b>{altIn(i.size_now)}</b> → {i.size_new != null ? <b className="text-green-800 text-base">{altIn(i.size_new)}</b> : <b className="text-red-700">not set</b>}
                     {i.size_new != null && <span className="text-gray-600"> · {altSizeVerb(i.size_dim, i.size_now, i.size_new)} {altIn(Math.abs(i.size_new - i.size_now))}</span>}</div>}
                   <div className="text-sm text-green-800 font-medium mt-0.5">Fix: {i.fix || "—"}</div>
                   {i.description && <div className="text-sm text-gray-700">{i.description}</div>}

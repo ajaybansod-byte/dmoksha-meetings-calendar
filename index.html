@@ -2364,21 +2364,40 @@ const ISSUE_TYPES = ["Size – short", "Size – long", "Width issue", "Stitchin
 // a few questions, and the FIX is written from the answers (he can change it).
 // The client's designer then approves / changes / rejects each issue in the
 // support-team app; the factory sees the case at once, tagged until approved.
+// FACTORY MISTAKE (Ajay 20 Nov 2026): the factory made a curtain the wrong size
+// (ordered 88", made 86"). Then the fix is "make it the final size", not
+// "lengthen by n" — which would have turned 1" short into 89". The job sheet
+// shows Size NOW = as made, Size NEW = the final size, with the order's size.
+const ALT_FM = "Factory made it the wrong size";
+const altIsFM = (a) => (a || {}).why === ALT_FM;
+const altFmFix = (dim, a) => { const m = Number(a.made), f = Number(a.final), w = a.side && a.side !== "Whole curtain" ? ` on the ${a.side.toLowerCase()}` : "";
+  const head = `Factory made it ${altIn(m)} instead of ${altIn(f)} — `;
+  if (dim === "width") return head + (f > m ? `add width to ${altIn(f)} — extra fabric joined, or re-pleat with smaller gaps` : `reduce width to ${altIn(f)} — take in, or fewer pleats`);
+  return head + (f > m ? `lengthen to ${altIn(f)}${w} (let down the hem; if there is not enough hem, remake the panel)` : `shorten to ${altIn(f)}${w} — re-hem the bottom`); };
+const ALT_WHY = (dim) => ({ id: "why", label: `Why does the ${dim} need to change?`, opts: ["Size needs to change (made as ordered)", ALT_FM] });
 const ALT_KINDS = [
   { k: "height", label: "Height", qs: [
-      { id: "dir", label: "Too short or too long?", opts: ["Short", "Long"] },
-      { id: "inch", label: "By how many inches?", num: true },
+      ALT_WHY("height"),
+      { id: "dir", label: "Too short or too long?", opts: ["Short", "Long"], when: a => !!a.why && !altIsFM(a) },
+      { id: "inch", label: "By how many inches?", num: true, when: a => !!a.why && !altIsFM(a) },
+      { id: "made", label: "Height the factory made (measured at site)", num: true, when: altIsFM, hint: "Measure the curtain as it hangs now." },
+      { id: "final", label: "Final height to make", num: true, when: altIsFM, hint: "Filled in from the order. Change it only if the customer wants a different size." },
       { id: "side", label: "Where?", opts: ["Whole curtain", "Left side", "Right side"] }],
-    summary: a => `Height – ${(a.dir || "").toLowerCase()} by ${a.inch}"${a.side && a.side !== "Whole curtain" ? ` (${a.side.toLowerCase()})` : ""}`,
-    fix: a => { const n = Number(a.inch); const w = a.side && a.side !== "Whole curtain" ? ` on the ${a.side.toLowerCase()}` : "";
+    summary: a => altIsFM(a) ? `Height – factory mistake: made ${altIn(a.made)}, final ${altIn(a.final)}${a.side && a.side !== "Whole curtain" ? ` (${a.side.toLowerCase()})` : ""}`
+      : `Height – ${(a.dir || "").toLowerCase()} by ${a.inch}"${a.side && a.side !== "Whole curtain" ? ` (${a.side.toLowerCase()})` : ""}`,
+    fix: a => { if (altIsFM(a)) return altFmFix("height", a);
+      const n = Number(a.inch); const w = a.side && a.side !== "Whole curtain" ? ` on the ${a.side.toLowerCase()}` : "";
       return a.dir === "Long" ? `Shorten by ${n}"${w} — re-hem the bottom`
         : n <= 3 ? `Lengthen by ${n}"${w} — let down the hem`
         : `Lengthen by ${n}"${w} — add a matching band at the bottom or remake the panel (designer to choose)`; } },
   { k: "width", label: "Width", qs: [
-      { id: "dir", label: "Too narrow or too wide?", opts: ["Too narrow (gap at the centre / sides)", "Too wide (bunching)"] },
-      { id: "inch", label: "By how many inches?", num: true }],
-    summary: a => `Width – ${/narrow/i.test(a.dir || "") ? "narrow" : "wide"} by ${a.inch}"`,
-    fix: a => /narrow/i.test(a.dir || "") ? `Add ${a.inch}" of width — extra fabric joined, or re-pleat with smaller gaps` : `Reduce width by ${a.inch}" — take in, or fewer pleats` },
+      ALT_WHY("width"),
+      { id: "dir", label: "Too narrow or too wide?", opts: ["Too narrow (gap at the centre / sides)", "Too wide (bunching)"], when: a => !!a.why && !altIsFM(a) },
+      { id: "inch", label: "By how many inches?", num: true, when: a => !!a.why && !altIsFM(a) },
+      { id: "made", label: "Width the factory made (measured at site)", num: true, when: altIsFM, hint: "Measure the curtain as it hangs now." },
+      { id: "final", label: "Final width to make", num: true, when: altIsFM, hint: "Filled in from the order. Change it only if the customer wants a different size." }],
+    summary: a => altIsFM(a) ? `Width – factory mistake: made ${altIn(a.made)}, final ${altIn(a.final)}` : `Width – ${/narrow/i.test(a.dir || "") ? "narrow" : "wide"} by ${a.inch}"`,
+    fix: a => altIsFM(a) ? altFmFix("width", a) : /narrow/i.test(a.dir || "") ? `Add ${a.inch}" of width — extra fabric joined, or re-pleat with smaller gaps` : `Reduce width by ${a.inch}" — take in, or fewer pleats` },
   { k: "hem", label: "Hem not level", qs: [
       { id: "side", label: "Which side hangs lower?", opts: ["Left side", "Right side", "Centre"] },
       { id: "inch", label: "By how many inches?", num: true }],
@@ -2444,17 +2463,23 @@ const ALT_KINDS = [
 const altKind = (k) => ALT_KINDS.find(x => x.k === k);
 // Height/width issue → exact sizes: now = the order's finished size, new = now ± the inches Amit answered.
 function altIssueSize(order, it) {
-  const nowV = altSizeNow(order, it.item_key, it.kind === "width" ? "width" : "height");
+  const ordered = altSizeNow(order, it.item_key, it.kind === "width" ? "width" : "height");
+  if (altIsFM(it.ans)) {   // factory mistake: NOW = as made, NEW = the final size (Ajay 20 Nov 2026)
+    const m = Number((it.ans || {}).made), f = Number((it.ans || {}).final);
+    return { now: m > 0 ? m : null, new: f > 0 ? f : null, ordered, factory: true };
+  }
+  const nowV = ordered;
   const inch = Number((it.ans || {}).inch);
-  if (nowV == null || !(inch > 0)) return { now: nowV, new: null };
+  if (nowV == null || !(inch > 0)) return { now: nowV, new: null, ordered };
   const dir = (it.ans || {}).dir || "";
   const longer = it.kind === "width" ? /narrow/i.test(dir) : dir === "Short";   // too short → make longer; too narrow → make wider
-  return { now: nowV, new: Math.round((nowV + (longer ? inch : -inch)) * 100) / 100 };
+  return { now: nowV, new: Math.round((nowV + (longer ? inch : -inch)) * 100) / 100, ordered };
 }
 const altQs = (it) => { const kd = altKind(it.kind); return kd ? kd.qs.filter(q => !q.when || q.when(it.ans || {})) : []; };
 const altMissing = (it) => {
   if (!it.kind) return "pick what is wrong";
   for (const q of altQs(it)) { const v = (it.ans || {})[q.id]; if (!q.optional && (v == null || String(v).trim() === "" || (q.num && !(Number(v) > 0)))) return q.label.toLowerCase(); }
+  if (altIsFM(it.ans) && Number(it.ans.made) === Number(it.ans.final)) return "the final size — it is the same as the size made";
   if (!String(it.fix || "").trim()) return "the fix";
   return null;
 };
@@ -2739,11 +2764,17 @@ function OutcomeModal({ visit, card, data, user, city, onClose, onSaved, onSched
   const [issues, setIssues] = useState([newAltIssue()]);
   const [costBearer, setCostBearer] = useState("");   // Amit decides (15 Nov 2026): 'dmoksha' | 'customer'
   const designerName = card.order?.designer_name || visit.stylist || "";
+  // A factory-made wrong size is our cost — pick it unless Amit already chose (20 Nov 2026).
+  useEffect(() => { if (issues.some(i => altIsFM(i.ans))) setCostBearer(c => c || "dmoksha"); }, [issues]);
   // Answer a question / pick a kind → re-write the fix unless Amit typed his own.
   const setIssue = (idx, patch) => setIssues(a => a.map((x, j) => {
     if (j !== idx) return x;
     const n = { ...x, ...patch };
     if (patch.kind !== undefined && patch.kind !== x.kind) { n.ans = {}; n.fixEdited = false; n.fix = ""; }
+    // Factory mistake: the final size starts as the order's size (Ajay 20 Nov 2026).
+    if ((n.kind === "height" || n.kind === "width") && altIsFM(n.ans) && (n.ans.final == null || n.ans.final === "" || (patch.item_key !== undefined && patch.item_key !== x.item_key))) {
+      const ord = altSizeNow(card.order, n.item_key, n.kind); if (ord != null) n.ans = { ...n.ans, final: String(ord) };
+    }
     const kd = altKind(n.kind);
     if (kd && !n.fixEdited && !patch.hasOwnProperty("fix")) { const ok = altQs(n).every(q => q.optional || (n.ans[q.id] != null && String(n.ans[q.id]).trim() !== "")); n.fix = ok ? kd.fix(n.ans) : ""; }
     return n;
@@ -2759,7 +2790,7 @@ function OutcomeModal({ visit, card, data, user, city, onClose, onSaved, onSched
     if (outcome === "partial" && isInstall && planned.length && Object.values(done).filter(Boolean).length === 0) { setErr("Tick at least one curtain that was installed."); return; }
     if (outcome === "alteration") {
       for (let n = 0; n < issues.length; n++) { const m = altMissing(issues[n]); if (m) { setErr(`Issue ${n + 1}: answer ${m}.`); return; } }
-      for (let n = 0; n < issues.length; n++) { const it = issues[n]; if ((it.kind === "height" || it.kind === "width") && altIssueSize(card.order, it).now == null) { setErr(`Issue ${n + 1}: pick the curtain, so the factory gets the exact new ${it.kind}.`); return; } }
+      for (let n = 0; n < issues.length; n++) { const it = issues[n]; if ((it.kind === "height" || it.kind === "width") && altIssueSize(card.order, it).ordered == null) { setErr(`Issue ${n + 1}: pick the curtain, so the factory gets the exact new ${it.kind}.`); return; } }
       if (issues.some(i => i.kind === "other" && !i.description.trim())) { setErr("Describe the issue marked Other."); return; }
       if (!costBearer) { setErr("Choose whose cost this alteration is."); return; }
     }
@@ -2786,7 +2817,7 @@ function OutcomeModal({ visit, card, data, user, city, onClose, onSaved, onSched
           const { error: ie } = await supabase.from("alteration_issues").insert({ case_id: caseId, item_key: it.item_key || null, item_label: item ? item.label : (it.item_key ? it.item_key : "General"), layer: item?.layer || null,
             issue_type: kd ? kd.summary(it.ans) : "Other", description: it.description || null, photos,
             problem: { kind: it.kind, answers: it.ans }, fix: it.fix.trim(), fix_default: kd ? kd.fix(it.ans) : null, designer_status: designerName ? "pending" : null,
-            ...((it.kind === "height" || it.kind === "width") ? (() => { const sz = altIssueSize(o, it); return { size_dim: it.kind, size_now: sz.now, size_new: sz.new }; })() : {}) });
+            ...((it.kind === "height" || it.kind === "width") ? (() => { const sz = altIssueSize(o, it); return { size_dim: it.kind, size_now: sz.now, size_new: sz.new, size_ordered: sz.ordered, size_cause: sz.factory ? "factory_mistake" : null }; })() : {}) });
           if (ie) throw new Error(ie.message);
         }
       }
@@ -2844,11 +2875,14 @@ function OutcomeModal({ visit, card, data, user, city, onClose, onSaved, onSched
                   {kd && altQs(it).map(q => (
                     <div key={q.id}><span className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">{q.label}</span>
                       {q.opts ? <div className="flex flex-wrap gap-1.5 mt-1">{q.opts.map(o => <button type="button" key={o} onClick={() => setIssue(idx, { ans: { ...it.ans, [q.id]: o } })} className={chip(it.ans[q.id] === o)}>{o}</button>)}</div>
-                        : <input type={q.num ? "number" : "text"} min="0" step={q.num ? "0.25" : undefined} inputMode={q.num ? "decimal" : undefined} value={it.ans[q.id] ?? ""} onChange={e => setIssue(idx, { ans: { ...it.ans, [q.id]: e.target.value } })} className={inp} placeholder={q.num ? (q.id === "inch" ? "inches, e.g. 1" : "number") : ""} style={q.num ? { maxWidth: 160 } : undefined} />}
+                        : <input type={q.num ? "number" : "text"} min="0" step={q.num ? "0.25" : undefined} inputMode={q.num ? "decimal" : undefined} value={it.ans[q.id] ?? ""} onChange={e => setIssue(idx, { ans: { ...it.ans, [q.id]: e.target.value } })} className={inp} placeholder={q.num ? (q.id === "inch" ? "inches, e.g. 1" : (q.id === "made" || q.id === "final") ? "inches, e.g. 86" : "number") : ""} style={q.num ? { maxWidth: 160 } : undefined} />}
+                      {q.hint && <div className="text-[11px] text-gray-500 mt-0.5">{q.hint}</div>}
                     </div>))}
                   {(it.kind === "height" || it.kind === "width") && (() => { const sz = altIssueSize(card.order, it); return (
-                    <div className={`rounded-lg border px-3 py-2 text-sm ${sz.now == null ? "bg-amber-50 border-amber-300 text-amber-800" : "bg-white border-gray-300"}`}>
-                      {sz.now == null ? <>Pick the curtain above — its {it.kind} from the order is needed to work out the new size.</>
+                    <div className={`rounded-lg border px-3 py-2 text-sm ${sz.ordered == null ? "bg-amber-50 border-amber-300 text-amber-800" : "bg-white border-gray-300"}`}>
+                      {sz.ordered == null ? <>Pick the curtain above — its {it.kind} from the order is needed to work out the new size.</>
+                        : sz.factory ? <>Ordered <b>{altIn(sz.ordered)}</b> · factory made <b className="text-red-700">{sz.now != null ? altIn(sz.now) : "—"}</b> → final: <b className="text-green-700 text-base">{sz.new != null ? altIn(sz.new) : "—"}</b>{sz.new != null && sz.now != null && <span className="text-gray-600"> ({altSizeVerb(it.kind, sz.now, sz.new)} {altIn(Math.abs(sz.new - sz.now))})</span>}
+                          <div className="text-[11px] text-gray-500">This is what the factory's job sheet will say: Size NOW {sz.now != null ? altIn(sz.now) : "—"} → Size NEW {sz.new != null ? altIn(sz.new) : "—"}.</div></>
                         : <>{it.kind === "height" ? "Height" : "Width"} in the order: <b>{altIn(sz.now)}</b> → new: <b className="text-green-700 text-base">{sz.new != null ? altIn(sz.new) : "—"}</b>{sz.new != null && <span className="text-gray-600"> ({altSizeVerb(it.kind, sz.now, sz.new)} {altIn(Math.abs(sz.new - sz.now))})</span>}
                           <div className="text-[11px] text-gray-500">This is what the factory's job sheet will say.</div></>}
                     </div>); })()}
@@ -2929,11 +2963,11 @@ function openAlterationJobSheet(win, cs, issues, order, photoUrl) {
     const nowV = i.size_now != null ? Number(i.size_now) : null, newV = i.size_new != null ? Number(i.size_new) : null;
     const diff = nowV != null && newV != null ? newV - nowV : null;
     const sizeCells = sized
-      ? `<td class="c">${i.size_dim === "width" ? "Width" : "Height"}<br><b>${altIn(nowV)}</b></td>
+      ? `<td class="c">${i.size_dim === "width" ? "Width" : "Height"}<br><b>${altIn(nowV)}</b>${i.size_cause === "factory_mistake" ? `<br><span class="small red">as made${i.size_ordered != null ? ` · ordered ${altIn(i.size_ordered)}` : ""}</span>` : ""}</td>
          <td class="c new">${newV != null ? `<span class="big">${altIn(newV)}</span>` : `<span class="red"><b>NOT SET</b><br>call the designer</span>`}</td>
          <td class="c">${diff != null ? `<b class="red">${diff > 0 ? "+" : "−"}${altIn(Math.abs(diff))}</b><br>${altSizeVerb(i.size_dim, nowV, newV)}` : "—"}</td>`
       : `<td colspan="3" class="fixcell"><b>${esc(i.fix || "—")}</b></td>`;
-    return `<tr><td class="c">${n + 1}</td><td>${esc(i.item_label || "General")}${i.layer ? `<br><b>${esc(String(i.layer).toUpperCase())}</b>` : ""}</td>
+    return `<tr><td class="c">${n + 1}</td><td>${esc(i.item_label || "General")}${i.layer ? `<br><b>${esc(String(i.layer).toUpperCase())}</b>` : ""}${i.size_cause === "factory_mistake" ? `<br><span class="fm">FACTORY MISTAKE</span>` : ""}</td>
       <td class="small">${fabricLine(i)}</td><td class="c">${widthOf(i)}</td>${sizeCells}</tr>`;
   }).join("");
   const anyShorten = live.some(i => i.size_dim === "height" && i.size_new != null && Number(i.size_new) < Number(i.size_now));
@@ -2963,6 +2997,7 @@ function openAlterationJobSheet(win, cs, issues, order, photoUrl) {
  .red { color: #B91C1C } .muted { color: #6B7280 } .fixcell { background: #ECFDF5; font-size: 12px }
  .how { border: 1px solid #9CA3AF; background: #F9FAFB; padding: 6px 8px 6px 22px; margin: 0 } .how li { margin: 2px 0 }
  .photos img { height: 70px; margin: 2px; border: 1px solid #ddd } .sign td { height: 30px } .foot { margin-top: 10px; font-size: 9px; color: #6B7280; text-align: right }
+ .fm { display: inline-block; background: #B91C1C; color: #fff; font-size: 9px; font-weight: bold; padding: 1px 5px; border-radius: 3px; margin-top: 3px }
  .warn { border: 2px solid #B91C1C; color: #B91C1C; padding: 6px; font-weight: bold; text-align: center; margin: 6px 0 }
  .bar { position: sticky; top: 0; background: #fff; padding: 8px 0; text-align: center } .bar button { font-size: 15px; padding: 10px 18px; background: #111827; color: #fff; border: 0; border-radius: 8px }
  @media print { .bar { display: none } }
@@ -3076,7 +3111,7 @@ function AlterationCaseModal({ caseId, data, edit, user, onClose, onChanged, onS
                   {edit && <input type="checkbox" checked={i.status === "resolved"} onChange={() => toggleIssue(i)} className="mt-1 w-5 h-5 accent-green-600" title="Mark resolved" />}
                   <div className="min-w-0 flex-1">
                     <div className={`text-sm font-semibold ${i.status === "resolved" ? "line-through text-gray-400" : "text-gray-900"}`}>{i.item_label}{i.layer ? ` · ${i.layer}` : ""} <span className="text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5 ml-1">{i.issue_type}</span></div>
-                    {i.size_dim && <div className="text-sm mt-0.5">{i.size_dim === "width" ? "Width" : "Height"}: <b>{altIn(i.size_now)}</b> → <b className="text-green-700">{i.size_new != null ? altIn(i.size_new) : <span className="text-red-700">not set — designer to confirm</span>}</b>{i.size_new != null && i.size_now != null && <span className="text-gray-600"> ({altSizeVerb(i.size_dim, i.size_now, i.size_new)} {altIn(Math.abs(i.size_new - i.size_now))})</span>}</div>}
+                    {i.size_dim && <div className="text-sm mt-0.5">{i.size_cause === "factory_mistake" && <span className="inline-block mr-1.5 px-1.5 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold align-middle">FACTORY MISTAKE</span>}{i.size_dim === "width" ? "Width" : "Height"}{i.size_cause === "factory_mistake" ? <> made</> : null}: <b>{altIn(i.size_now)}</b>{i.size_cause === "factory_mistake" && i.size_ordered != null && <span className="text-gray-600"> (ordered {altIn(i.size_ordered)})</span>} → <b className="text-green-700">{i.size_new != null ? altIn(i.size_new) : <span className="text-red-700">not set — designer to confirm</span>}</b>{i.size_new != null && i.size_now != null && <span className="text-gray-600"> ({altSizeVerb(i.size_dim, i.size_now, i.size_new)} {altIn(Math.abs(i.size_new - i.size_now))})</span>}</div>}
                     {i.fix && <div className="text-sm text-green-800 mt-0.5"><b>Fix:</b> {i.fix}</div>}
                     {i.description && <div className="text-sm text-gray-700 mt-0.5">{i.description}</div>}
                     {i.designer_status && <div className={`text-xs mt-1 font-medium ${i.designer_status === "pending" ? "text-amber-700" : i.designer_status === "rejected" ? "text-red-700" : "text-green-700"}`}>
